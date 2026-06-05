@@ -11,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # --- কনফিগারেশন ---
 # ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন
-ADMIN_ID = 123456789 
+ADMIN_ID = 5165615512 
 
 BOT_TOKEN = "8803328478:AAEpVHyLj4svKmfktuewTMZP_1ydvu9zdCQ"
 bot = telebot.TeleBot(BOT_TOKEN)
