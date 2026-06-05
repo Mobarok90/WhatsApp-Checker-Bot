@@ -5,6 +5,11 @@ on:
     - cron: '0 */3 * * *' # প্রতি ৩ ঘণ্টা পর পর ওয়ার্কফ্লো রান হবে
   workflow_dispatch:      # ম্যানুয়ালি রান করার জন্য
 
+# ⚠️ এখানে মূল স্মার্ট ফিক্স: নতুন রান শুরু হলে আগের পুরোনো রানটি অটোম্যাটিক বন্ধ হয়ে যাবে
+concurrency:
+  group: whatsapp-checker-bot
+  cancel-in-progress: true
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -42,7 +47,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyTelegramBotAPI selenium
 
-      # ⚠️ এখানে মূল ফিক্স: পুরানো এবং অমিল থাকা ক্রোম ড্রাইভার সম্পূর্ণ ডিলিট করা
+      # পুরানো ক্রোম ড্রাইভার সম্পূর্ণ ডিলিট করা
       - name: Remove Incompatible Pre-installed Chromedriver
         run: |
           sudo rm -f /usr/bin/chromedriver
