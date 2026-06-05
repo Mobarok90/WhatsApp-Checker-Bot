@@ -5,7 +5,7 @@ on:
     - cron: '0 */3 * * *' # প্রতি ৩ ঘণ্টা পর পর ওয়ার্কফ্লো রান হবে
   workflow_dispatch:      # ম্যানুয়ালি রান করার জন্য
 
-# ⚠️ এখানে মূল স্মার্ট ফিক্স: নতুন রান শুরু হলে আগের পুরোনো রানটি অটোম্যাটিক বন্ধ হয়ে যাবে
+# নতুন রান শুরু হলে আগের পুরোনো রানটি অটোম্যাটিক বন্ধ হয়ে যাবে
 concurrency:
   group: whatsapp-checker-bot
   cancel-in-progress: true
@@ -33,26 +33,21 @@ jobs:
           restore-keys: |
             whatsapp-session-${{ runner.os }}-
 
-      - name: Install Chrome & Dependencies
+      - name: Install Google Chrome
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget curl unzip xvfb
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
-          sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+
+      # 🔍 এখানে মূল স্মার্ট ফিক্স: অফিশিয়াল অ্যাকশন যা ক্রোমের সংস্করণের সাথে ১০০% মিলিয়ে ড্রাইভার সেটআপ করবে
+      - name: Setup ChromeDriver
+        uses: nanasess/setup-chromedriver@v3
 
       - name: Install Python Requirements
         run: |
           python -m pip install --upgrade pip
           pip install pyTelegramBotAPI selenium
 
-      # পুরানো ক্রোম ড্রাইভার সম্পূর্ণ ডিলিট করা
-      - name: Remove Incompatible Pre-installed Chromedriver
-        run: |
-          sudo rm -f /usr/bin/chromedriver
-          sudo rm -f /usr/local/bin/chromedriver
-
       - name: Run Selenium Bot
         run: |
+          # xvfb-run ব্যবহার করে ভার্চুয়াল ডিসপ্লেতে হেডলেস ক্রোম রান করা
           xvfb-run --auto-servernum timeout 220m python -u bot.py || true
