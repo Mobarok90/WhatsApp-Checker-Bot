@@ -5,9 +5,12 @@ from telebot import types
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # --- কনফিগারেশন ---
-# ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন (যেমন: ADMIN_ID = 12345678)
+# ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন
 ADMIN_ID = 5165615512 
 
 BOT_TOKEN = "8803328478:AAEpVHyLj4svKmfktuewTMZP_1ydvu9zdCQ"
@@ -23,7 +26,7 @@ def get_driver():
         options.add_argument("--headless=new")  # আধুনিক হেডলেস মোড
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--window-size=1280,800")  # কিউআর কোড স্পষ্ট দেখানোর জন্য উপযুক্ত রেজুলেশন
+        options.add_argument("--window-size=1280,800")  # কোড স্পষ্ট দেখানোর জন্য রেজুলেশন
         
         # --- অ্যান্টি-বট সিকিউরিটি বাইপাস সেটিংস ---
         options.add_argument("--disable-blink-features=AutomationControlled")
@@ -55,7 +58,7 @@ def send_welcome(message):
         reply_markup=markup
     )
 
-# ২. সুরক্ষিত অ্যাডমিন লগইন কমান্ড (শুধু আপনি কিউআর কোড পাবেন, অন্য কেউ দিলে রিজেক্ট হবে)
+# ২. সুরক্ষিত অ্যাডমিন লগইন কমান্ড (লিঙ্ক কোড জেনারেশন)
 @bot.message_handler(commands=['login'])
 def admin_login(message):
     # আইডি যাচাই করা
@@ -63,23 +66,82 @@ def admin_login(message):
         bot.send_message(message.chat.id, "❌ দুঃখিত, এই কমান্ডটি শুধুমাত্র বটের অ্যাডমিনের জন্য সংরক্ষিত।")
         return
 
-    bot.send_message(message.chat.id, "⏳ হোয়াটসঅ্যাপ কানেকশন স্ট্যাটাস চেক করা হচ্ছে...")
+    msg = bot.send_message(
+        message.chat.id, 
+        "📱 দয়া করে আপনার নিজের হোয়াটসঅ্যাপ নম্বরটি কান্ট্রি কোডসহ পাঠান (যেমন: 88017XXXXXXXX):\n"
+        "(এই নম্বরটি দিয়ে আপনার বটটি কানেক্ট বা লিঙ্ক হবে)"
+    )
+    bot.register_next_step_handler(msg, process_admin_phone)
+
+# ফোন নম্বর প্রসেস এবং হোয়াটসঅ্যাপ থেকে লিঙ্ক কোড পাওয়ার ফাংশন
+def process_admin_phone(message):
+    phone_number = message.text.strip().replace("+", "").replace(" ", "")
+    
+    bot.send_message(message.chat.id, f"⏳ হোয়াটসঅ্যাপে {phone_number} নম্বরটির জন্য লিঙ্ক কোড তৈরি করা হচ্ছে...")
+    
     try:
         web_driver = get_driver()
         web_driver.get("https://web.whatsapp.com")
-        time.sleep(12)  # কিউআর কোড জেনারেট হওয়ার জন্য পর্যাপ্ত সময়
         
-        # সেশন সচল আছে কি না দেখা
-        chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
-        if len(chat_list) > 0:
-            bot.send_message(message.chat.id, "✅ হোয়াটসঅ্যাপ সেশন সফলভাবে লগইন করা আছে!")
+        # 'Link with phone number' বাটন খুঁজে বের করা এবং ক্লিক করা
+        button_xpath = "//*[contains(text(), 'Link with phone number') or contains(text(), 'Log in with phone number') or contains(text(), 'Link with Phone Number') or contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন')]"
+        
+        try:
+            link_btn = WebDriverWait(web_driver, 25).until(
+                EC.element_to_be_clickable((By.XPATH, button_xpath))
+            )
+            link_btn.click()
+            time.sleep(3)
+        except Exception as e:
+            # চ্যাট লিস্ট আছে কিনা চেক করি (অলরেডি লগইন থাকলে)
+            chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+            if len(chat_list) > 0:
+                bot.send_message(message.chat.id, "✅ আপনার হোয়াটসঅ্যাপ সেশন ইতিপূর্বে সফলভাবে লগইন করা আছে!")
+                return
+            else:
+                raise e
+        
+        # ফোন নম্বর ইনপুট বক্সে নম্বরটি টাইপ করা
+        phone_input = WebDriverWait(web_driver, 15).until(
+            EC.presence_of_element_located((By.XPATH, "//input"))
+        )
+        phone_input.clear()
+        phone_input.send_keys(phone_number)
+        time.sleep(1)
+        
+        # এন্টার দিয়ে সাবমিট করা (যাতে কোডটি জেনারেট হয়)
+        phone_input.send_keys(Keys.ENTER)
+        time.sleep(8) # কোড তৈরি হওয়ার জন্য সময়
+        
+        # স্ক্রিনশট নিয়ে ৮-অক্ষরের কোডের উইন্ডোটি পাঠানো
+        web_driver.save_screenshot("pairing_code.png")
+        with open("pairing_code.png", "rb") as code_file:
+            caption_text = (
+                "🔑 ছবির মাঝখানে আপনার ৮-অক্ষরের লিঙ্ক কোডটি দেখতে পাবেন।\n\n"
+                "👉 **এটি যেভাবে লিঙ্ক করবেন:**\n"
+                "১. আপনার মোবাইলের WhatsApp-এ যান ➡️ ডানদিকের ৩টি ডট (বা সেটিংস) ➡️ Linked Devices (লিঙ্ক ডিভাইস) ➡️ Link a Device এ ক্লিক করুন।\n"
+                "২. এবার নিচে থাকা 'Link with phone number instead' (ফোন নম্বর দিয়ে লিঙ্ক করুন) অপশনটিতে ক্লিক করুন।\n"
+                "৩. ছবিতে দেখতে পাওয়া ৮ অক্ষরের লিঙ্ক কোডটি আপনার মোবাইলে সঠিকভাবে টাইপ করুন।"
+            )
+            bot.send_photo(message.chat.id, code_file, caption=caption_text)
+            
+        # ব্যাকগ্রাউন্ডে চেক করা যে তারা সফলভাবে লিঙ্ক করেছে কিনা
+        bot.send_message(message.chat.id, "⏳ আপনার মোবাইলে কোডটি প্রবেশ করার জন্য অপেক্ষা করছি (আমি ১ মিনিট চেক করব)...")
+        linked = False
+        for _ in range(20): # মোট ৬০ সেকেন্ড চেক করবে
+            time.sleep(3)
+            chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+            if len(chat_list) > 0:
+                linked = True
+                break
+                
+        if linked:
+            bot.send_message(message.chat.id, "🎉 অভিনন্দন! আপনার হোয়াটসঅ্যাপ অ্যাকাউন্টটি সফলভাবে লিঙ্ক হয়েছে। এখন যেকোনো ইউজার সরাসরি নম্বর চেক করতে পারবেন।")
         else:
-            bot.send_message(message.chat.id, "⏳ সেশন সক্রিয় নেই। লগইন করার জন্য কিউআর কোড জেনারেট করা হচ্ছে...")
-            web_driver.save_screenshot("qr_code.png")
-            with open("qr_code.png", "rb") as qr_file:
-                bot.send_photo(message.chat.id, qr_file, caption="আপনার হোয়াটসঅ্যাপ অ্যাপ দিয়ে এই কিউআর কোডটি স্ক্যান করে নিন।")
+            bot.send_message(message.chat.id, "⏱️ লিঙ্ক করার সময় শেষ হয়ে গেছে। যদি এখনও লিঙ্ক না হয়ে থাকে, তবে আবার `/login` লিখে চেষ্টা করুন।")
+            
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ ত্রুটি ঘটেছে: {e}")
+        bot.send_message(message.chat.id, f"❌ কোড জেনারেট করার সময় ত্রুটি ঘটেছে: {e}")
 
 # ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার
 @bot.message_handler(func=lambda message: True)
@@ -124,7 +186,7 @@ def process_phone(message):
             bot.send_message(
                 message.chat.id, 
                 "⚠️ বটটি এখনও আপনার হোয়াটসঅ্যাপের সাথে লিংক করা নেই!\n\n"
-                "👉 দয়া করে প্রথমে বটের চ্যাটে `/login` কমান্ডটি লিখে কিউআর (QR) কোডটি স্ক্যান করে নিন।"
+                "👉 দয়া করে প্রথমে বটের চ্যাটে `/login` কমান্ডটি ব্যবহার করে অ্যাকাউন্টটি কানেক্ট করুন।"
             )
             return
 
