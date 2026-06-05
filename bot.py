@@ -17,7 +17,7 @@ def get_driver():
     global driver
     if driver is None:
         options = Options()
-        options.add_argument("--headless")  # গিটহাব অ্যাকশন্সের জন্য হেডলেস রান করা আবশ্যক
+        options.add_argument("--headless=new")  # আধুনিক হেডলেস মোড
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1920,1080")
@@ -27,7 +27,7 @@ def get_driver():
         driver.set_page_load_timeout(45)
     return driver
 
-# ১. স্টার্ট কমান্ড - কোনো চেকিং ছাড়াই সাথে সাথে বাটন চলে আসবে
+# ১. স্টার্ট কমান্ড (কোনো বিলম্ব ছাড়াই বাটন চলে আসবে)
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -41,76 +41,7 @@ def send_welcome(message):
         reply_markup=markup
     )
 
-# ২. বাটন ক্লিক হ্যান্ডলার
-@bot.message_handler(func=lambda message: True)
-def handle_buttons(message):
-    if message.text == "👤 ডেভেলপার":
-        dev_info = (
-            "👤 **ডেভেলপার ইনফরমেশন:**\n\n"
-            "এই অটোমেশন সিস্টেমটি পাইথন দিয়ে তৈরি করা হয়েছে।"
-        )
-        bot.send_message(message.chat.id, dev_info, parse_mode="Markdown")
-        
-    elif message.text == "🔍 চেক ডাবলু এস":
-        msg = bot.send_message(
-            message.chat.id, 
-            "অনুগ্রহ করে কান্ট্রি কোডসহ ফোন নম্বরটি পাঠান (যেমন: 88017XXXXXXXX):"
-        )
-        # পরবর্তী মেসেজটি নম্বর হিসেবে প্রসেস করা হবে
-        bot.register_next_step_handler(msg, process_phone)
-
-# ৩. নম্বর যাচাই করার মূল লজিক (ইউজার কোনো কিউআর কোড দেখবে না)
-def process_phone(message):
-    phone = message.text.strip()
-    if phone in ["👤 ডেভেলপার", "🔍 চেক ডাবলু এস"]:
-        handle_buttons(message)
-        return
-
-    bot.send_message(message.chat.id, f"⏳ {phone} নম্বরটি যাচাই করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...")
-    
-    try:
-        web_driver = get_driver()
-        url = f"https://web.whatsapp.com/send?phone={phone}"
-        web_driver.get(url)
-        
-        # পেজ লোড হওয়ার জন্য অপেক্ষা
-        time.sleep(10)
-        
-        # ১. লগইন স্ট্যাটাস চেক (সবচেয়ে গুরুত্বপূর্ণ):
-        # যদি কিউআর কোড স্ক্রিনে থাকে অথবা চ্যাটের মূল প্যানেল না পাওয়া যায়, তবে লগইন নেই
-        qr_present = web_driver.find_elements(By.XPATH, "//canvas[@aria-label='Scan me!']")
-        chat_pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
-        chat_input = web_driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
-        
-        if len(qr_present) > 0 or (len(chat_pane) == 0 and len(chat_input) == 0):
-            bot.send_message(
-                message.chat.id, 
-                "⚠️ বটটি এখনও আপনার হোয়াটসঅ্যাপের সাথে লিংক করা নেই!\n\n"
-                "👉 দয়া করে প্রথমে বটের চ্যাটে `/login` কমান্ডটি লিখে কিউআর (QR) কোডটি স্ক্যান করে নিন।"
-            )
-            return
-
-        # ২. ইনভ্যালিড নম্বর চেক করা
-        invalid_popup = web_driver.find_elements(By.XPATH, "//*[contains(text(), 'invalid') or contains(text(), 'অবৈধ') or contains(text(), 'Invalid')]")
-        if len(invalid_popup) > 0:
-            try:
-                ok_button = web_driver.find_element(By.XPATH, "//button//span[contains(text(), 'OK') or contains(text(), 'ঠিক আছে')]")
-                ok_button.click()
-            except:
-                pass
-            bot.send_message(message.chat.id, f"❌ {phone} নম্বরটিতে কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট নেই।")
-        else:
-            # চ্যাট ইনপুট বক্স আছে কি না চেক করা (সঠিক নম্বর)
-            if len(chat_input) > 0:
-                bot.send_message(message.chat.id, f"✅ {phone} নম্বরটিতে একটি সক্রিয় হোয়াটসঅ্যাপ অ্যাকাউন্ট আছে।")
-            else:
-                bot.send_message(message.chat.id, "⚠️ নিশ্চিত হওয়া যায়নি। পেজ লোড হতে অতিরিক্ত সময় লেগেছে।")
-                
-    except Exception as e:
-        print(f"Error: {e}")
-        bot.send_message(message.chat.id, "❌ একটি অভ্যন্তরীণ ত্রুটি ঘটেছে। অনুগ্রহ করে আবার চেষ্টা করুন।")
-
-# ৪. গোপন অ্যাডমিন লগইন কমান্ড (শুধু কিউআর কোড পাওয়ার জন্য আপনি এটি ব্যবহার করবেন)
+# ২. গোপন অ্যাডমিন লগইন কমান্ড (এটি বাটন হ্যান্ডলারের উপরে থাকবে যাতে সঠিকভাবে কাজ করে)
 @bot.message_handler(commands=['login'])
 def admin_login(message):
     bot.send_message(message.chat.id, "⏳ হোয়াটসঅ্যাপ কানেকশন স্ট্যাটাস চেক করা হচ্ছে...")
@@ -130,6 +61,74 @@ def admin_login(message):
                 bot.send_photo(message.chat.id, qr_file, caption="আপনার হোয়াটসঅ্যাপ অ্যাপ দিয়ে এই কিউআর কোডটি স্ক্যান করে নিন।")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ ত্রুটি ঘটেছে: {e}")
+
+# ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার (এটি সবার নিচে থাকবে যাতে অন্য কমান্ডগুলোকে বাধা না দেয়)
+@bot.message_handler(func=lambda message: True)
+def handle_buttons(message):
+    if message.text == "👤 ডেভেলপার":
+        dev_info = (
+            "👤 **ডেভেলপার ইনফরমেশন:**\n\n"
+            "এই অটোমেশন সিস্টেমটি পাইথন দিয়ে তৈরি করা হয়েছে।"
+        )
+        bot.send_message(message.chat.id, dev_info, parse_mode="Markdown")
+        
+    elif message.text == "🔍 চেক ডাবলু এস":
+        msg = bot.send_message(
+            message.chat.id, 
+            "অনুগ্রহ করে কান্ট্রি কোডসহ ফোন নম্বরটি পাঠান (যেমন: 88017XXXXXXXX):"
+        )
+        # পরবর্তী মেসেজটি নম্বর হিসেবে প্রসেস করার জন্য রেজিস্টার করা
+        bot.register_next_step_handler(msg, process_phone)
+
+# ৪. নম্বর যাচাই করার মূল লজিক
+def process_phone(message):
+    phone = message.text.strip()
+    if phone in ["👤 ডেভেলপার", "🔍 চেক ডাবলু এস"]:
+        handle_buttons(message)
+        return
+
+    bot.send_message(message.chat.id, f"⏳ {phone} নম্বরটি যাচাই করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...")
+    
+    try:
+        web_driver = get_driver()
+        url = f"https://web.whatsapp.com/send?phone={phone}"
+        web_driver.get(url)
+        
+        # পেজ লোড হওয়ার জন্য অপেক্ষা
+        time.sleep(10)
+        
+        # লগইন স্ট্যাটাস চেক
+        qr_present = web_driver.find_elements(By.XPATH, "//canvas[@aria-label='Scan me!']")
+        chat_pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+        chat_input = web_driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
+        
+        if len(qr_present) > 0 or (len(chat_pane) == 0 and len(chat_input) == 0):
+            bot.send_message(
+                message.chat.id, 
+                "⚠️ বটটি এখনও আপনার হোয়াটসঅ্যাপের সাথে লিংক করা নেই!\n\n"
+                "👉 দয়া করে প্রথমে বটের চ্যাটে `/login` কমান্ডটি লিখে কিউআর (QR) কোডটি স্ক্যান করে নিন।"
+            )
+            return
+
+        # ইনভ্যালিড নম্বর চেক করা
+        invalid_popup = web_driver.find_elements(By.XPATH, "//*[contains(text(), 'invalid') or contains(text(), 'অবৈধ') or contains(text(), 'Invalid')]")
+        if len(invalid_popup) > 0:
+            try:
+                ok_button = web_driver.find_element(By.XPATH, "//button//span[contains(text(), 'OK') or contains(text(), 'ঠিক আছে')]")
+                ok_button.click()
+            except:
+                pass
+            bot.send_message(message.chat.id, f"❌ {phone} নম্বরটিতে কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট নেই।")
+        else:
+            # চ্যাট ইনপুট বক্স আছে কি না চেক করা (সঠিক নম্বর)
+            if len(chat_input) > 0:
+                bot.send_message(message.chat.id, f"✅ {phone} নম্বরটিতে একটি সক্রিয় হোয়াটসঅ্যাপ অ্যাকাউন্ট আছে।")
+            else:
+                bot.send_message(message.chat.id, "⚠️ নিশ্চিত হওয়া যায়নি। পেজ লোড হতে অতিরিক্ত সময় লেগেছে।")
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        bot.send_message(message.chat.id, "❌ একটি অভ্যন্তরীণ ত্রুটি ঘটেছে। অনুগ্রহ করে আবার চেষ্টা করুন।")
 
 # পোলিং স্টার্ট
 if __name__ == "__main__":
