@@ -54,7 +54,7 @@ def send_welcome(message):
     
     bot.send_message(
         message.chat.id, 
-        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগতম! নিচের বাটনগুলো ব্যবহার করুন:", 
+        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগত! নিচের বাটনগুলো ব্যবহার করুন:", 
         reply_markup=markup
     )
 
@@ -141,7 +141,9 @@ def process_admin_phone(message):
             bot.send_message(message.chat.id, "⏱️ লিঙ্ক করার সময় শেষ হয়ে গেছে। যদি এখনও লিঙ্ক না হয়ে থাকে, তবে আবার `/login` লিখে চেষ্টা করুন।")
             
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ কোড জেনারেট করার সময় ত্রুটি ঘটেছে: {e}")
+        # শুধুমাত্র দরকারি এরর মেসেজটি ফিল্টার করে পাঠানো
+        error_msg = str(e).split("\n")[0]
+        bot.send_message(message.chat.id, f"❌ কোড জেনারেট করার সময় ত্রুটি ঘটেছে: {error_msg}")
 
 # ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার
 @bot.message_handler(func=lambda message: True)
