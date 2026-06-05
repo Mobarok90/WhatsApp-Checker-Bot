@@ -76,13 +76,21 @@ def process_phone(message):
         # পেজ লোড হওয়ার জন্য অপেক্ষা
         time.sleep(10)
         
-        # প্রথমে চেক করা যে হোয়াটসঅ্যাপ লগইন অবস্থায় আছে কি না
+        # ১. লগইন স্ট্যাটাস চেক (সবচেয়ে গুরুত্বপূর্ণ):
+        # যদি কিউআর কোড স্ক্রিনে থাকে অথবা চ্যাটের মূল প্যানেল না পাওয়া যায়, তবে লগইন নেই
         qr_present = web_driver.find_elements(By.XPATH, "//canvas[@aria-label='Scan me!']")
-        if len(qr_present) > 0:
-            bot.send_message(message.chat.id, "⚠️ দুঃখিত, বর্তমানে সার্ভারটি হোয়াটসঅ্যাপের সাথে সংযুক্ত নেই। অনুগ্রহ করে অ্যাডমিনকে জানান।")
+        chat_pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+        chat_input = web_driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
+        
+        if len(qr_present) > 0 or (len(chat_pane) == 0 and len(chat_input) == 0):
+            bot.send_message(
+                message.chat.id, 
+                "⚠️ বটটি এখনও আপনার হোয়াটসঅ্যাপের সাথে লিংক করা নেই!\n\n"
+                "👉 দয়া করে প্রথমে বটের চ্যাটে `/login` কমান্ডটি লিখে কিউআর (QR) কোডটি স্ক্যান করে নিন।"
+            )
             return
 
-        # ইনভ্যালিড নম্বর চেক করা
+        # ২. ইনভ্যালিড নম্বর চেক করা
         invalid_popup = web_driver.find_elements(By.XPATH, "//*[contains(text(), 'invalid') or contains(text(), 'অবৈধ') or contains(text(), 'Invalid')]")
         if len(invalid_popup) > 0:
             try:
@@ -93,7 +101,6 @@ def process_phone(message):
             bot.send_message(message.chat.id, f"❌ {phone} নম্বরটিতে কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট নেই।")
         else:
             # চ্যাট ইনপুট বক্স আছে কি না চেক করা (সঠিক নম্বর)
-            chat_input = web_driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
             if len(chat_input) > 0:
                 bot.send_message(message.chat.id, f"✅ {phone} নম্বরটিতে একটি সক্রিয় হোয়াটসঅ্যাপ অ্যাকাউন্ট আছে।")
             else:
