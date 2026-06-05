@@ -8,7 +8,7 @@ from selenium.webdriver.chrome.options import Options
 
 # --- কনফিগারেশন ---
 # ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন (যেমন: ADMIN_ID = 12345678)
-ADMIN_ID = 123456789 
+ADMIN_ID = 5165615512 
 
 BOT_TOKEN = "8803328478:AAEpVHyLj4svKmfktuewTMZP_1ydvu9zdCQ"
 bot = telebot.TeleBot(BOT_TOKEN)
