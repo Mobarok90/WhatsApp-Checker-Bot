@@ -26,6 +26,8 @@ def get_driver():
         options.add_argument("--headless=new")  # আধুনিক হেডলেস মোড
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")  # গিটহাব অ্যাকশনের স্ট্যাবিলিটির জন্য জিপিইউ বন্ধ করা
+        options.add_argument("--ignore-certificate-errors")
         options.add_argument("--window-size=1280,800")  # কোড স্পষ্ট দেখানোর জন্য রেজুলেশন
         
         # --- অ্যান্টি-বট সিকিউরিটি বাইপাস সেটিংস ---
@@ -36,7 +38,7 @@ def get_driver():
         options.add_argument("--user-data-dir=./whatsapp_session")
         
         driver = webdriver.Chrome(options=options)
-        driver.set_page_load_timeout(45)
+        driver.set_page_load_timeout(55)
         
         # ব্রাউজারের ভেতর থেকে সেলেনিয়াম রোবট ফ্ল্যাগ মুছে ফেলা
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -54,7 +56,7 @@ def send_welcome(message):
     
     bot.send_message(
         message.chat.id, 
-        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগত! নিচের বাটনগুলো ব্যবহার করুন:", 
+        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগতম! নিচের বাটনগুলো ব্যবহার করুন:", 
         reply_markup=markup
     )
 
@@ -141,8 +143,13 @@ def process_admin_phone(message):
             bot.send_message(message.chat.id, "⏱️ লিঙ্ক করার সময় শেষ হয়ে গেছে। যদি এখনও লিঙ্ক না হয়ে থাকে, তবে আবার `/login` লিখে চেষ্টা করুন।")
             
     except Exception as e:
-        # শুধুমাত্র দরকারি এরর মেসেজটি ফিল্টার করে পাঠানো
+        # জটিল এরর মেসেজগুলো মানুষের পাঠযোগ্য বাংলায় রূপান্তর করা
         error_msg = str(e).split("\n")[0]
+        if "TimeoutException" in str(type(e)):
+            error_msg = "হোয়াটসঅ্যাপ পেজ লোড হতে অতিরিক্ত সময় লেগেছে (সার্ভার স্লো)। অনুগ্রহ করে আবার চেষ্টা করুন।"
+        elif "WebDriverException" in str(type(e)):
+            error_msg = "ব্রাউজার ব্যাকগ্রাউন্ডে চালু হতে ব্যর্থ হয়েছে। অনুগ্রহ করে আবার ট্রাই করুন।"
+        
         bot.send_message(message.chat.id, f"❌ কোড জেনারেট করার সময় ত্রুটি ঘটেছে: {error_msg}")
 
 # ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার
