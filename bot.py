@@ -11,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # --- কনফিগারেশন ---
 # ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন
-ADMIN_ID = 5165615512 
+ADMIN_ID = 123456789 
 
 BOT_TOKEN = "8803328478:AAEpVHyLj4svKmfktuewTMZP_1ydvu9zdCQ"
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -30,6 +30,9 @@ def get_driver():
         options.add_argument("--ignore-certificate-errors")
         options.add_argument("--window-size=1280,800")  # কোড স্পষ্ট দেখানোর জন্য রেজুলেশন
         
+        # 🔍 স্মার্ট ফিক্স ১: পেজ লোড স্ট্র্যাটেজি 'eager' করা (ভারী ইমেজের জন্য ব্রাউজার আটকে থাকবে না)
+        options.page_load_strategy = 'eager'
+        
         # --- অ্যান্টি-বট সিকিউরিটি বাইপাস সেটিংস ---
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -38,7 +41,9 @@ def get_driver():
         options.add_argument("--user-data-dir=./whatsapp_session")
         
         driver = webdriver.Chrome(options=options)
-        driver.set_page_load_timeout(55)
+        
+        # 🔍 স্মার্ট ফিক্স ২: সর্বোচ্চ লোড টাইম বাড়িয়ে ১২০ সেকেন্ড করা হলো
+        driver.set_page_load_timeout(120)
         
         # ব্রাউজারের ভেতর থেকে সেলেনিয়াম রোবট ফ্ল্যাগ মুছে ফেলা
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -85,11 +90,12 @@ def process_admin_phone(message):
         web_driver = get_driver()
         web_driver.get("https://web.whatsapp.com")
         
-        # 'Link with phone number' বাটন খুঁজে বের করা এবং ক্লিক করা
+        # 'Link with phone number' বাটনটি খোঁজা
         button_xpath = "//*[contains(text(), 'Link with phone number') or contains(text(), 'Log in with phone number') or contains(text(), 'Link with Phone Number') or contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন')]"
         
         try:
-            link_btn = WebDriverWait(web_driver, 25).until(
+            # 🔍 স্মার্ট ফিক্স ৩: লিঙ্ক বাটনটি স্ক্রিনে দৃশ্যমান হওয়া পর্যন্ত সর্বোচ্চ ৯০ সেকেন্ড ডায়নামিকালি অপেক্ষা করবে
+            link_btn = WebDriverWait(web_driver, 90).until(
                 EC.element_to_be_clickable((By.XPATH, button_xpath))
             )
             link_btn.click()
