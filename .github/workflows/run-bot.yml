@@ -2,13 +2,13 @@ name: 24/7 WhatsApp Checker Bot
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # প্রতি ৩ ঘণ্টা পর পর ওয়ার্কফ্লো স্বয়ংক্রিয়ভাবে নতুন করে ট্রিগার হবে
-  workflow_dispatch:      # গিটহাব থেকে ম্যানুয়ালি রান করার জন্য
+    - cron: '0 */3 * * *' # প্রতি ৩ ঘণ্টা পর পর ওয়ার্কফ্লো রান হবে
+  workflow_dispatch:      # ম্যানুয়ালি রান করার জন্য
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 230  # গিটহাবের টাইমআউট লিমিট এড়াতে ৩.৮ ঘণ্টা পর স্বয়ংক্রিয় স্টপ হবে
+    timeout-minutes: 230
 
     steps:
       - name: Checkout Repository
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      # হোয়াটসঅ্যাপ লগইন সেশন ক্যাশে সেভ করে রাখার জন্য (যাতে বারবার স্ক্যান করতে না হয়)
+      # সেশন ক্যাশ সংরক্ষণ
       - name: Cache WhatsApp Session
         uses: actions/cache@v3
         with:
@@ -42,7 +42,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyTelegramBotAPI selenium
 
+      # ⚠️ এখানে মূল ফিক্স: পুরানো এবং অমিল থাকা ক্রোম ড্রাইভার সম্পূর্ণ ডিলিট করা
+      - name: Remove Incompatible Pre-installed Chromedriver
+        run: |
+          sudo rm -f /usr/bin/chromedriver
+          sudo rm -f /usr/local/bin/chromedriver
+
       - name: Run Selenium Bot
-          # xvfb-run ভার্চুয়াল ফ্রেমবাফার দিয়ে হেডলেস মোডে স্ক্রিপ্ট সচল রাখবে
         run: |
           xvfb-run --auto-servernum timeout 220m python -u bot.py || true
