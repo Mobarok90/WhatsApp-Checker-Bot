@@ -56,7 +56,7 @@ def human_type(element, text):
     element.clear()
     for character in text:
         element.send_keys(character)
-        time.sleep(random.uniform(0.15, 0.35))  # মানুষের স্বাভাবিক কিবোর্ড টাইপ স্পিড
+        time.sleep(random.uniform(0.18, 0.38))  # মানুষের কিবোর্ড টাইপ স্পিডের অনুভূতি
 
 # মানুষের মতো ব্রাউজার স্ক্রোল করার হেল্পার ফাংশন
 def human_scroll(web_driver):
@@ -82,8 +82,8 @@ def send_failure_diagnostic(message, error_msg, web_driver):
             f"🌐 **লিঙ্ক:** {current_url}\n"
             f"📄 **টাইটেল:** {page_title}\n\n"
             "🤖 **AI এনালাইসিস ও সম্ভাব্য সমাধান:**\n"
-            "১. ব্রাউজারটি হোয়াটসঅ্যাপের লোডিং অ্যানিমেশনে আটকে থাকতে পারে।\n"
-            "২. সেলেনিয়ামকে হোয়াটসঅ্যাপ সাময়িকভাবে ব্লক বা ডিটেক্ট করতে পারে।\n\n"
+            "১. ব্রাউজারটি হোয়াটসঅ্যাপের লোডিং পেজে আটকে থাকতে পারে।\n"
+            "২. সেশন রিফ্রেশ বা কানেকশন জটিলতা তৈরি হতে পারে।\n\n"
             "👇 ব্রাউজারে ঠিক এই মুহূর্তে কী দেখা যাচ্ছে তার রিয়েল-টাইম স্ক্রিনশট নিচে পাঠানো হলো:"
         )
         with open("diagnostic.png", "rb") as diag_file:
@@ -122,9 +122,23 @@ def admin_login(message):
 
 # ফোন নম্বর প্রসেস এবং হোয়াটসঅ্যাপ থেকে লিঙ্ক কোড পাওয়ার ফাংশন
 def process_admin_phone(message):
-    phone_number = message.text.strip().replace("+", "").replace(" ", "")
+    phone_input_raw = message.text.strip().replace("+", "").replace(" ", "")
     
-    bot.send_message(message.chat.id, f"⏳ হোয়াটসঅ্যাপে {phone_number} নম্বরটির জন্য লিঙ্ক কোড তৈরি করা হচ্ছে...")
+    # এআই ভিত্তিক পার্সিং (Country Code এবং Local Phone Number আলাদা করা)
+    c_code = "880"  # ডিফল্ট বাংলাদেশ কোড
+    local_num = phone_input_raw
+    
+    if phone_input_raw.startswith("880") and len(phone_input_raw) > 10:
+        c_code = "880"
+        local_num = phone_input_raw[3:]
+    elif phone_input_raw.startswith("0") and len(phone_input_raw) > 10:
+        c_code = "880"
+        local_num = phone_input_raw[1:]
+    elif len(phone_input_raw) == 10 and phone_input_raw.startswith("1"):
+        c_code = "880"
+        local_num = phone_input_raw
+    
+    bot.send_message(message.chat.id, f"⏳ হোয়াটসঅ্যাপে কান্ট্রি কোড (+{c_code}) এবং ফোন নম্বর ({local_num}) এর জন্য লিঙ্ক কোড তৈরি করা হচ্ছে...")
     
     try:
         web_driver = get_driver()
@@ -179,35 +193,49 @@ def process_admin_phone(message):
             else:
                 raise TimeoutException("নির্ধারিত সময়ে হোয়াটসঅ্যাপের লিঙ্ক বাটনটি পাওয়া যায়নি।")
         
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: দৃশ্যমান ও সক্রিয় ফোন নম্বর ইনপুট বক্সটি ফিল্টার করা হচ্ছে...")
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: দৃশ্যমান ও সক্রিয় ফোন নম্বর ইনপুট বক্স দুটি ফিল্টার করা হচ্ছে...")
         
-        # দৃশ্যমান ও সক্রিয় ইনপুট ফিল্ডটি খুঁজে বের করার সেলফ-হিলিং লুপ
-        phone_input = None
+        # কান্ট্রি কোড ও ফোন নম্বরের দুটি দৃশ্যমান ইনপুট ফিল্ড খুঁজে বের করার লুপ
+        visible_inputs = []
         start_input_time = time.time()
         while time.time() - start_input_time < 30:
             inputs = web_driver.find_elements(By.XPATH, "//input")
             for inp in inputs:
-                # শুধুমাত্র দৃশ্যমান ও সক্রিয় টেক্সট ইনপুট বক্সটি ফিল্টার করা হচ্ছে
+                # শুধুমাত্র দৃশ্যমান ও সক্রিয় ইনপুট ফিল্ড ফিল্টার করা হচ্ছে
                 if inp.is_displayed() and inp.is_enabled():
                     inp_type = inp.get_attribute("type")
                     if inp_type != "file" and inp_type != "hidden":
-                        phone_input = inp
-                        break
-            if phone_input:
+                        if inp not in visible_inputs:
+                            visible_inputs.append(inp)
+            # হোয়াটসঅ্যাপের লিঙ্ক পেজে অন্তত ২টি ইনপুট বক্স থাকে (কান্ট্রি কোড এবং ফোন নম্বর)
+            if len(visible_inputs) >= 2:
                 break
             time.sleep(2)
+            visible_inputs = [] # রিসেট করে আবার খুঁজবে
             
-        if phone_input is None:
-            raise TimeoutException("ফোন নম্বর ইনপুট বক্সটি দৃশ্যমান অবস্থায় পাওয়া যায়নি।")
+        if len(visible_inputs) < 2:
+            raise TimeoutException("কান্ট্রি কোড বা ফোন নম্বরের ইনপুট বক্সগুলো খুঁজে পাওয়া যায়নি।")
         
-        bot.send_message(message.chat.id, f"🤖 [AI এনালাইসিস]: মানুষের মতো টাইপ করে ক্রমান্বয়ে {phone_number} নম্বরটি ইনপুট দেওয়া হচ্ছে...")
-        human_type(phone_input, phone_number)
+        # ১. কান্ট্রি কোড বক্সে এআই টাইপিং
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: ডিফল্ট কান্ট্রি কোডটি কিবোর্ডের মাধ্যমে মুছে বাংলাদেশের কোড সেট করা হচ্ছে...")
+        visible_inputs[0].send_keys(Keys.CONTROL + "a")
+        visible_inputs[0].send_keys(Keys.BACKSPACE)
+        time.sleep(1)
+        human_type(visible_inputs[0], c_code)
+        time.sleep(1.5)
+        
+        # ২. ফোন নম্বর বক্সে এআই টাইপিং
+        bot.send_message(message.chat.id, f"🤖 [AI এনালাইসিস]: মানুষের মতো টাইপ করে ফোন নম্বর {local_num} ইনপুট দেওয়া হচ্ছে...")
+        visible_inputs[1].send_keys(Keys.CONTROL + "a")
+        visible_inputs[1].send_keys(Keys.BACKSPACE)
+        time.sleep(1)
+        human_type(visible_inputs[1], local_num)
         time.sleep(2)
         
         # সাবমিট করা
         bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: এন্টার কি-প্রেসের মাধ্যমে লিঙ্ক ফর্ম সাবমিট করা হচ্ছে...")
-        phone_input.send_keys(Keys.ENTER)
-        time.sleep(10) # কোড সম্পূর্ণভাবে জেনারেট হয়ে স্ক্রিনে আসার সময়
+        visible_inputs[1].send_keys(Keys.ENTER)
+        time.sleep(12) # কোড সম্পূর্ণভাবে জেনারেট হয়ে স্ক্রিনে আসার সময়
         
         # স্ক্রিনশট নিয়ে উইন্ডো পাঠানো
         web_driver.save_screenshot("pairing_code.png")
@@ -236,6 +264,7 @@ def process_admin_phone(message):
             bot.send_message(message.chat.id, "⏱️ লিঙ্ক করার সময় শেষ হয়ে গেছে। যদি এখনও লিঙ্ক না হয়ে থাকে, তবে আবার `/login` লিখে চেষ্টা করুন।")
             
     except Exception as e:
+        # জটিল এরর মেসেজগুলো মানুষের পাঠযোগ্য বাংলায় রূপান্তর করা
         error_msg = str(e).split("\n")[0]
         if "TimeoutException" in str(type(e)):
             error_msg = "হোয়াটসঅ্যাপ পেজ লোড হতে অতিরিক্ত সময় লেগেছে (সার্ভার স্লো)।"
