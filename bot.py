@@ -51,20 +51,20 @@ def get_driver():
         })
     return driver
 
-# মানুষের মতো ধীরে ধীরে টাইপ করার হেল্পার ফাংশন
+# মানুষের মতো অত্যন্ত ধীরে ধীরে টাইপ করার হেল্পার ফাংশন (টাইপিং বিরতি আরও বাড়ানো হয়েছে)
 def human_type(element, text):
     element.clear()
     for character in text:
         element.send_keys(character)
-        time.sleep(random.uniform(0.18, 0.38))  # মানুষের কিবোর্ড টাইপ স্পিডের অনুভূতি
+        time.sleep(random.uniform(0.25, 0.55))  # অত্যন্ত ধীরস্থির স্বাভাবিক কিবোর্ড টাইপ স্পিড
 
-# মানুষের মতো ব্রাউজার স্ক্রোল করার হেল্পার ফাংশন
+# মানুষের মতো ব্রাউজার স্ক্রোল করার হেল্পার ফাংশন (স্ক্রোল বিরতি বৃদ্ধি)
 def human_scroll(web_driver):
     try:
-        web_driver.execute_script("window.scrollTo(0, 150);")
-        time.sleep(1.2)
+        web_driver.execute_script("window.scrollTo(0, 200);")
+        time.sleep(2.0)
         web_driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(0.8)
+        time.sleep(1.5)
     except:
         pass
 
@@ -101,7 +101,7 @@ def send_welcome(message):
     
     bot.send_message(
         message.chat.id, 
-        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগতম! নিচের বাটনগুলো ব্যবহার করুন:", 
+        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগত! নিচের বাটনগুলো ব্যবহার করুন:", 
         reply_markup=markup
     )
 
@@ -145,19 +145,22 @@ def process_admin_phone(message):
         bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: ক্রোম সেশন শুরু করা হয়েছে। হোয়াটসঅ্যাপ পেজ লোড হচ্ছে...")
         web_driver.get("https://web.whatsapp.com")
         
-        # মানুষের মতো স্ক্রিলিং আচরণ করা
+        # পেজ লোড হওয়ার পর মানুষের মতো কিছুক্ষণ স্ক্রিন দেখা ও স্ক্রোল করা
+        time.sleep(8)
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: মানুষের মতো স্ক্রিন স্ক্রোল করা হচ্ছে...")
         human_scroll(web_driver)
+        time.sleep(4)
         
-        # বাটনটি খোঁজার জন্য একাধিক স্মার্ট লোকেটার (কেস-ইনসেনসিティブ সার্চ)
+        # 🔍 সুনির্দিষ্ট লোকেটারসমূহ (প্যারেন্ট ম্যাচ এড়াতে contains(text(), ...) এবং div[@role='button'] ব্যবহার করা হয়েছে)
         locators = [
-            "//*[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link with phone')]",
-            "//*[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'phone number instead')]",
+            "//div[@role='button'][contains(., 'phone number') or contains(., 'Phone Number')]",
+            "//span[contains(text(), 'Log in with phone number') or contains(text(), 'Link with phone number')]",
+            "//div[contains(text(), 'Log in with phone number') or contains(text(), 'Link with phone number')]",
             "//*[contains(text(), 'Link with phone number') or contains(text(), 'Log in with phone number')]",
-            "//*[contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন') or contains(text(), 'নম্বর দিয়ে লিঙ্ক')]",
-            "//span[@role='button' and contains(., 'phone')]"
+            "//*[contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন') or contains(text(), 'নম্বর দিয়ে লিঙ্ক')]"
         ]
         
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: হোয়াটসঅ্যাপের লিঙ্ক বাটনটি ডায়নামিকালি অনবরত অনুসন্ধান করা হচ্ছে...")
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: হোয়াটসঅ্যাপের লিঙ্ক বাটনটি ডায়নামিকালি অনুসন্ধান করা হচ্ছে...")
         
         link_btn = None
         start_time = time.time()
@@ -175,7 +178,10 @@ def process_admin_phone(message):
             time.sleep(3) # প্রতি ৩ সেকেন্ড পর পর পুনরায় খুঁজবে
         
         if link_btn:
-            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটনটি পাওয়া গেছে। ডাবল-লেয়ার ক্লিক মেথড চালানো হচ্ছে...")
+            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটনটি পাওয়া গেছে। মানুষের মতো ক্লিক করা হচ্ছে...")
+            
+            # মানুষের মতো ক্লিক করার আগে সামান্য বিরতি (১.৫ সেকেন্ড)
+            time.sleep(1.5)
             
             # ডাবল-লেয়ার ক্লিক মেথড (যাতে কোনো অবস্থায় ক্লিক মিস না হয়)
             try:
@@ -183,7 +189,8 @@ def process_admin_phone(message):
             except Exception:
                 web_driver.execute_script("arguments[0].click();", link_btn)
                 
-            time.sleep(6)  # পেজ পরিবর্তন ও লোডের জন্য একটু সময় দেওয়া
+            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটন ক্লিক করা হয়েছে। পেজ পরিবর্তন ও এনিমেশনের জন্য অপেক্ষা করা হচ্ছে...")
+            time.sleep(8)  # পেজ পরিবর্তন ও লোডের জন্য মানুষের মতো ৮ সেকেন্ড সময় দেওয়া
         else:
             # যদি বাটন না পায় তবে চেক করা সেশন অলরেডি লগইন আছে কিনা
             chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
@@ -220,20 +227,22 @@ def process_admin_phone(message):
         bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: ডিফল্ট কান্ট্রি কোডটি কিবোর্ডের মাধ্যমে মুছে বাংলাদেশের কোড সেট করা হচ্ছে...")
         visible_inputs[0].send_keys(Keys.CONTROL + "a")
         visible_inputs[0].send_keys(Keys.BACKSPACE)
-        time.sleep(1)
-        human_type(visible_inputs[0], c_code)
         time.sleep(1.5)
+        human_type(visible_inputs[0], c_code)
+        time.sleep(2)
         
         # ২. ফোন নম্বর বক্সে এআই টাইপিং
         bot.send_message(message.chat.id, f"🤖 [AI এনালাইসিস]: মানুষের মতো টাইপ করে ফোন নম্বর {local_num} ইনপুট দেওয়া হচ্ছে...")
         visible_inputs[1].send_keys(Keys.CONTROL + "a")
         visible_inputs[1].send_keys(Keys.BACKSPACE)
-        time.sleep(1)
+        time.sleep(1.5)
         human_type(visible_inputs[1], local_num)
-        time.sleep(2)
+        
+        # সাবমিট করার আগে মানুষের মতো নম্বরটি রিভিউ করার বিরতি (৩ সেকেন্ড)
+        time.sleep(3)
         
         # সাবমিট করা
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: এন্টার কি-প্রেসের মাধ্যমে লিঙ্ক ফর্ম সাবমিট করা হচ্ছে...")
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: নম্বর নিশ্চিত করা হয়েছে। লিঙ্ক ফর্ম সাবমিট করা হচ্ছে...")
         visible_inputs[1].send_keys(Keys.ENTER)
         time.sleep(12) # কোড সম্পূর্ণভাবে জেনারেট হয়ে স্ক্রিনে আসার সময়
         
