@@ -56,7 +56,7 @@ def human_type(element, text):
     element.clear()
     for character in text:
         element.send_keys(character)
-        time.sleep(random.uniform(0.12, 0.32))  # মানুষের টাইপ স্পিডের অনুভূতি
+        time.sleep(random.uniform(0.15, 0.35))  # মানুষের স্বাভাবিক কিবোর্ড টাইপ স্পিড
 
 # মানুষের মতো ব্রাউজার স্ক্রোল করার হেল্পার ফাংশন
 def human_scroll(web_driver):
@@ -81,8 +81,8 @@ def send_failure_diagnostic(message, error_msg, web_driver):
             f"❌ **ত্রুটির ধরণ:** `{error_msg}`\n"
             f"🌐 **লিঙ্ক:** {current_url}\n"
             f"📄 **টাইটেল:** {page_title}\n\n"
-            "🤖 **AI এনালাইসিস:**\n"
-            "১. ব্রাউজারটি হোয়াটসঅ্যাপের লোডিং অ্যানিমেশনে আটকে থাকতে পারে (ধীরগতির ইন্টারনেট)।\n"
+            "🤖 **AI এনালাইসিস ও সম্ভাব্য সমাধান:**\n"
+            "১. ব্রাউজারটি হোয়াটসঅ্যাপের লোডিং অ্যানিমেশনে আটকে থাকতে পারে।\n"
             "২. সেলেনিয়ামকে হোয়াটসঅ্যাপ সাময়িকভাবে ব্লক বা ডিটেক্ট করতে পারে।\n\n"
             "👇 ব্রাউজারে ঠিক এই মুহূর্তে কী দেখা যাচ্ছে তার রিয়েল-টাইম স্ক্রিনশট নিচে পাঠানো হলো:"
         )
@@ -108,6 +108,7 @@ def send_welcome(message):
 # ২. সুরক্ষিত অ্যাডমিন লগইন কমান্ড (লিঙ্ক কোড জেনারেশন)
 @bot.message_handler(commands=['login'])
 def admin_login(message):
+    # আইডি যাচাই করা
     if message.chat.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ দুঃখিত, এই কমান্ডটি শুধুমাত্র বটের অ্যাডমিনের জন্য সংরক্ষিত।")
         return
@@ -133,7 +134,7 @@ def process_admin_phone(message):
         # মানুষের মতো স্ক্রিলিং আচরণ করা
         human_scroll(web_driver)
         
-        # বাটনটি খোঁজার জন্য একাধিক স্মার্ট লোকেটার (কেস-ইনসেনসিটিভ সার্চ)
+        # বাটনটি খোঁজার জন্য একাধিক স্মার্ট লোকেটার (কেস-ইনসেনসিティブ সার্চ)
         locators = [
             "//*[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link with phone')]",
             "//*[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'phone number instead')]",
@@ -160,9 +161,15 @@ def process_admin_phone(message):
             time.sleep(3) # প্রতি ৩ সেকেন্ড পর পর পুনরায় খুঁজবে
         
         if link_btn:
-            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটনটি খুঁজে পাওয়া গেছে। মানুষের স্পর্শের মতো ক্লিক করা হচ্ছে...")
-            link_btn.click()
-            time.sleep(3)
+            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটনটি পাওয়া গেছে। ডাবল-লেয়ার ক্লিক মেথড চালানো হচ্ছে...")
+            
+            # ডাবল-লেয়ার ক্লিক মেথড (যাতে কোনো অবস্থায় ক্লিক মিস না হয়)
+            try:
+                link_btn.click()
+            except Exception:
+                web_driver.execute_script("arguments[0].click();", link_btn)
+                
+            time.sleep(6)  # পেজ পরিবর্তন ও লোডের জন্য একটু সময় দেওয়া
         else:
             # যদি বাটন না পায় তবে চেক করা সেশন অলরেডি লগইন আছে কিনা
             chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
@@ -172,14 +179,30 @@ def process_admin_phone(message):
             else:
                 raise TimeoutException("নির্ধারিত সময়ে হোয়াটসঅ্যাপের লিঙ্ক বাটনটি পাওয়া যায়নি।")
         
-        # ফোন নম্বর ইনপুট বক্স সচল হওয়া পর্যন্ত অপেক্ষা
-        phone_input = WebDriverWait(web_driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, "//input"))
-        )
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: দৃশ্যমান ও সক্রিয় ফোন নম্বর ইনপুট বক্সটি ফিল্টার করা হচ্ছে...")
+        
+        # দৃশ্যমান ও সক্রিয় ইনপুট ফিল্ডটি খুঁজে বের করার সেলফ-হিলিং লুপ
+        phone_input = None
+        start_input_time = time.time()
+        while time.time() - start_input_time < 30:
+            inputs = web_driver.find_elements(By.XPATH, "//input")
+            for inp in inputs:
+                # শুধুমাত্র দৃশ্যমান ও সক্রিয় টেক্সট ইনপুট বক্সটি ফিল্টার করা হচ্ছে
+                if inp.is_displayed() and inp.is_enabled():
+                    inp_type = inp.get_attribute("type")
+                    if inp_type != "file" and inp_type != "hidden":
+                        phone_input = inp
+                        break
+            if phone_input:
+                break
+            time.sleep(2)
+            
+        if phone_input is None:
+            raise TimeoutException("ফোন নম্বর ইনপুট বক্সটি দৃশ্যমান অবস্থায় পাওয়া যায়নি।")
         
         bot.send_message(message.chat.id, f"🤖 [AI এনালাইসিস]: মানুষের মতো টাইপ করে ক্রমান্বয়ে {phone_number} নম্বরটি ইনপুট দেওয়া হচ্ছে...")
         human_type(phone_input, phone_number)
-        time.sleep(1.5)
+        time.sleep(2)
         
         # সাবমিট করা
         bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: এন্টার কি-প্রেসের মাধ্যমে লিঙ্ক ফর্ম সাবমিট করা হচ্ছে...")
@@ -219,7 +242,7 @@ def process_admin_phone(message):
         elif "WebDriverException" in str(type(e)):
             error_msg = "ব্রাউজার ব্যাকগ্রাউন্ডে চালু হতে ব্যর্থ হয়েছে।"
             
-        # 🔍 ব্যর্থতার প্রকৃত কারণ এবং বাস্তব স্ক্রিনশট সহ রিপোর্ট পাঠানো
+        # ব্যর্থতার প্রকৃত কারণ এবং বাস্তব স্ক্রিনশট সহ রিপোর্ট পাঠানো
         send_failure_diagnostic(message, error_msg, web_driver)
 
 # ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার
