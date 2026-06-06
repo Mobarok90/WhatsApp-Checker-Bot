@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import telebot
 from telebot import types
 from selenium import webdriver
@@ -8,6 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 # --- কনফিগারেশন ---
 # ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন
@@ -28,9 +30,9 @@ def get_driver():
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")  # গিটহাব অ্যাকশনের স্ট্যাবিলিটির জন্য জিপিইউ বন্ধ করা
         options.add_argument("--ignore-certificate-errors")
-        options.add_argument("--window-size=1280,800")  # কোড স্পষ্ট দেখানোর জন্য রেজুলেশন
+        options.add_argument("--window-size=1920,1080")  # ডেস্কটপ লেআউট নিশ্চিত করতে বড় রেজুলেশন
         
-        # 🔍 স্মার্ট ফিক্স ১: পেজ লোড স্ট্র্যাটেজি 'eager' করা (ভারী ইমেজের জন্য ব্রাউজার আটকে থাকবে না)
+        # পেজ লোড স্ট্র্যাটেজি 'eager' (ভারী ইমেজের জন্য ব্রাউজার আটকে থাকবে না)
         options.page_load_strategy = 'eager'
         
         # --- অ্যান্টি-বট সিকিউরিটি বাইপাস সেটিংস ---
@@ -41,8 +43,6 @@ def get_driver():
         options.add_argument("--user-data-dir=./whatsapp_session")
         
         driver = webdriver.Chrome(options=options)
-        
-        # 🔍 স্মার্ট ফিক্স ২: সর্বোচ্চ লোড টাইম বাড়িয়ে ১২০ সেকেন্ড করা হলো
         driver.set_page_load_timeout(120)
         
         # ব্রাউজারের ভেতর থেকে সেলেনিয়াম রোবট ফ্ল্যাগ মুছে ফেলা
@@ -50,6 +50,46 @@ def get_driver():
             "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         })
     return driver
+
+# মানুষের মতো ধীরে ধীরে টাইপ করার হেল্পার ফাংশন
+def human_type(element, text):
+    element.clear()
+    for character in text:
+        element.send_keys(character)
+        time.sleep(random.uniform(0.12, 0.32))  # মানুষের টাইপ স্পিডের অনুভূতি
+
+# মানুষের মতো ব্রাউজার স্ক্রোল করার হেল্পার ফাংশন
+def human_scroll(web_driver):
+    try:
+        web_driver.execute_script("window.scrollTo(0, 150);")
+        time.sleep(1.2)
+        web_driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(0.8)
+    except:
+        pass
+
+# ব্যর্থ হলে লাইভ ডায়াগনস্টিক রিপোর্ট এবং বাস্তব স্ক্রিনশট পাঠানোর ফাংশন
+def send_failure_diagnostic(message, error_msg, web_driver):
+    try:
+        # গিটহাবের ভার্চুয়াল ব্রাউজারের বর্তমান অবস্থার ছবি তোলা
+        web_driver.save_screenshot("diagnostic.png")
+        page_title = web_driver.title
+        current_url = web_driver.current_url
+        
+        report = (
+            "🔍 **[AI গভীর ডায়াগনস্টিক রিপোর্ট]**\n\n"
+            f"❌ **ত্রুটির ধরণ:** `{error_msg}`\n"
+            f"🌐 **লিঙ্ক:** {current_url}\n"
+            f"📄 **টাইটেল:** {page_title}\n\n"
+            "🤖 **AI এনালাইসিস:**\n"
+            "১. ব্রাউজারটি হোয়াটসঅ্যাপের লোডিং অ্যানিমেশনে আটকে থাকতে পারে (ধীরগতির ইন্টারনেট)।\n"
+            "২. সেলেনিয়ামকে হোয়াটসঅ্যাপ সাময়িকভাবে ব্লক বা ডিটেক্ট করতে পারে।\n\n"
+            "👇 ব্রাউজারে ঠিক এই মুহূর্তে কী দেখা যাচ্ছে তার রিয়েল-টাইম স্ক্রিনশট নিচে পাঠানো হলো:"
+        )
+        with open("diagnostic.png", "rb") as diag_file:
+            bot.send_photo(message.chat.id, diag_file, caption=report, parse_mode="Markdown")
+    except Exception as diag_e:
+        bot.send_message(message.chat.id, f"❌ AI ডায়াগনস্টিক রিপোর্ট তৈরি করতে ব্যর্থ হয়েছে: {diag_e}")
 
 # ১. স্টার্ট কমান্ড (কোনো বিলম্ব ছাড়াই বাটন চলে আসবে)
 @bot.message_handler(commands=['start'])
@@ -68,7 +108,6 @@ def send_welcome(message):
 # ২. সুরক্ষিত অ্যাডমিন লগইন কমান্ড (লিঙ্ক কোড জেনারেশন)
 @bot.message_handler(commands=['login'])
 def admin_login(message):
-    # আইডি যাচাই করা
     if message.chat.id != ADMIN_ID:
         bot.send_message(message.chat.id, "❌ দুঃখিত, এই কমান্ডটি শুধুমাত্র বটের অ্যাডমিনের জন্য সংরক্ষিত।")
         return
@@ -88,40 +127,66 @@ def process_admin_phone(message):
     
     try:
         web_driver = get_driver()
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: ক্রোম সেশন শুরু করা হয়েছে। হোয়াটসঅ্যাপ পেজ লোড হচ্ছে...")
         web_driver.get("https://web.whatsapp.com")
         
-        # 'Link with phone number' বাটনটি খোঁজা
-        button_xpath = "//*[contains(text(), 'Link with phone number') or contains(text(), 'Log in with phone number') or contains(text(), 'Link with Phone Number') or contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন')]"
+        # মানুষের মতো স্ক্রিলিং আচরণ করা
+        human_scroll(web_driver)
         
-        try:
-            # 🔍 স্মার্ট ফিক্স ৩: লিঙ্ক বাটনটি স্ক্রিনে দৃশ্যমান হওয়া পর্যন্ত সর্বোচ্চ ৯০ সেকেন্ড ডায়নামিকালি অপেক্ষা করবে
-            link_btn = WebDriverWait(web_driver, 90).until(
-                EC.element_to_be_clickable((By.XPATH, button_xpath))
-            )
+        # বাটনটি খোঁজার জন্য একাধিক স্মার্ট লোকেটার (কেস-ইনসেনসিটিভ সার্চ)
+        locators = [
+            "//*[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'link with phone')]",
+            "//*[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'phone number instead')]",
+            "//*[contains(text(), 'Link with phone number') or contains(text(), 'Log in with phone number')]",
+            "//*[contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন') or contains(text(), 'নম্বর দিয়ে লিঙ্ক')]",
+            "//span[@role='button' and contains(., 'phone')]"
+        ]
+        
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: হোয়াটসঅ্যাপের লিঙ্ক বাটনটি ডায়নামিকালি অনবরত অনুসন্ধান করা হচ্ছে...")
+        
+        link_btn = None
+        start_time = time.time()
+        timeout = 90  # বাটন দৃশ্যমান হওয়ার জন্য সর্বোচ্চ ৯০ সেকেন্ড অপেক্ষা করবে
+        
+        while time.time() - start_time < timeout:
+            for xpath in locators:
+                elements = web_driver.find_elements(By.XPATH, xpath)
+                active_elements = [el for el in elements if el.is_displayed()]
+                if active_elements:
+                    link_btn = active_elements[0]
+                    break
+            if link_btn:
+                break
+            time.sleep(3) # প্রতি ৩ সেকেন্ড পর পর পুনরায় খুঁজবে
+        
+        if link_btn:
+            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটনটি খুঁজে পাওয়া গেছে। মানুষের স্পর্শের মতো ক্লিক করা হচ্ছে...")
             link_btn.click()
             time.sleep(3)
-        except Exception as e:
-            # চ্যাট লিস্ট আছে কিনা চেক করি (অলরেডি লগইন থাকলে)
+        else:
+            # যদি বাটন না পায় তবে চেক করা সেশন অলরেডি লগইন আছে কিনা
             chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
             if len(chat_list) > 0:
                 bot.send_message(message.chat.id, "✅ আপনার হোয়াটসঅ্যাপ সেশন ইতিপূর্বে সফলভাবে লগইন করা আছে!")
                 return
             else:
-                raise e
+                raise TimeoutException("নির্ধারিত সময়ে হোয়াটসঅ্যাপের লিঙ্ক বাটনটি পাওয়া যায়নি।")
         
-        # ফোন নম্বর ইনপুট বক্সে নম্বরটি টাইপ করা
-        phone_input = WebDriverWait(web_driver, 15).until(
+        # ফোন নম্বর ইনপুট বক্স সচল হওয়া পর্যন্ত অপেক্ষা
+        phone_input = WebDriverWait(web_driver, 20).until(
             EC.presence_of_element_located((By.XPATH, "//input"))
         )
-        phone_input.clear()
-        phone_input.send_keys(phone_number)
-        time.sleep(1)
         
-        # এন্টার দিয়ে সাবমিট করা (যাতে কোডটি জেনারেট হয়)
+        bot.send_message(message.chat.id, f"🤖 [AI এনালাইসিস]: মানুষের মতো টাইপ করে ক্রমান্বয়ে {phone_number} নম্বরটি ইনপুট দেওয়া হচ্ছে...")
+        human_type(phone_input, phone_number)
+        time.sleep(1.5)
+        
+        # সাবমিট করা
+        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: এন্টার কি-প্রেসের মাধ্যমে লিঙ্ক ফর্ম সাবমিট করা হচ্ছে...")
         phone_input.send_keys(Keys.ENTER)
-        time.sleep(8) # কোড তৈরি হওয়ার জন্য সময়
+        time.sleep(10) # কোড সম্পূর্ণভাবে জেনারেট হয়ে স্ক্রিনে আসার সময়
         
-        # স্ক্রিনশট নিয়ে ৮-অক্ষরের কোডের উইন্ডোটি পাঠানো
+        # স্ক্রিনশট নিয়ে উইন্ডো পাঠানো
         web_driver.save_screenshot("pairing_code.png")
         with open("pairing_code.png", "rb") as code_file:
             caption_text = (
@@ -133,7 +198,6 @@ def process_admin_phone(message):
             )
             bot.send_photo(message.chat.id, code_file, caption=caption_text)
             
-        # ব্যাকগ্রাউন্ডে চেক করা যে তারা সফলভাবে লিঙ্ক করেছে কিনা
         bot.send_message(message.chat.id, "⏳ আপনার মোবাইলে কোডটি প্রবেশ করার জন্য অপেক্ষা করছি (আমি ১ মিনিট চেক করব)...")
         linked = False
         for _ in range(20): # মোট ৬০ সেকেন্ড চেক করবে
@@ -149,14 +213,14 @@ def process_admin_phone(message):
             bot.send_message(message.chat.id, "⏱️ লিঙ্ক করার সময় শেষ হয়ে গেছে। যদি এখনও লিঙ্ক না হয়ে থাকে, তবে আবার `/login` লিখে চেষ্টা করুন।")
             
     except Exception as e:
-        # জটিল এরর মেসেজগুলো মানুষের পাঠযোগ্য বাংলায় রূপান্তর করা
         error_msg = str(e).split("\n")[0]
         if "TimeoutException" in str(type(e)):
-            error_msg = "হোয়াটসঅ্যাপ পেজ লোড হতে অতিরিক্ত সময় লেগেছে (সার্ভার স্লো)। অনুগ্রহ করে আবার চেষ্টা করুন।"
+            error_msg = "হোয়াটসঅ্যাপ পেজ লোড হতে অতিরিক্ত সময় লেগেছে (সার্ভার স্লো)।"
         elif "WebDriverException" in str(type(e)):
-            error_msg = "ব্রাউজার ব্যাকগ্রাউন্ডে চালু হতে ব্যর্থ হয়েছে। অনুগ্রহ করে আবার ট্রাই করুন।"
-        
-        bot.send_message(message.chat.id, f"❌ কোড জেনারেট করার সময় ত্রুটি ঘটেছে: {error_msg}")
+            error_msg = "ব্রাউজার ব্যাকগ্রাউন্ডে চালু হতে ব্যর্থ হয়েছে।"
+            
+        # 🔍 ব্যর্থতার প্রকৃত কারণ এবং বাস্তব স্ক্রিনশট সহ রিপোর্ট পাঠানো
+        send_failure_diagnostic(message, error_msg, web_driver)
 
 # ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার
 @bot.message_handler(func=lambda message: True)
