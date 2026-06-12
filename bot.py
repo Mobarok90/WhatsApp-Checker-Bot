@@ -21,7 +21,9 @@ BOT_TOKEN  = os.environ.get("BOT_TOKEN", "8803328478:AAEpVHyLj4svKmfktuewTMZP_1y
 
 SESSION_DIR    = os.environ.get("WA_SESSION_DIR", "/tmp/whatsapp_session")
 SCREENSHOT_DIR = "/tmp"
-USE_HEADLESS   = os.environ.get("DISPLAY") is None
+# সবসময় headless=new — GitHub Actions-এ xvfb দিয়ে non-headless চালালে
+# WhatsApp Web blank পেজ দেখায়, তাই headless forced
+USE_HEADLESS   = True
 
 bot    = telebot.TeleBot(BOT_TOKEN)
 driver = None
@@ -476,20 +478,40 @@ def process_login_number(message):
         bot.send_message(message.chat.id, "🔍 Looking for *Link with phone number* button...", parse_mode="Markdown")
         link_btn = find_link_phone_button(wd)
 
+        # ── Attempt 2: wait 15s then retry ──
         if link_btn is None:
-            bot.send_message(message.chat.id, "⏳ Waiting 15 more seconds for page to load...")
+            bot.send_message(message.chat.id, "⏳ Still loading... waiting 15 more seconds.")
             time.sleep(15)
+            link_btn = find_link_phone_button(wd)
+
+        # ── Attempt 3: hard refresh then retry ──
+        if link_btn is None:
+            bot.send_message(message.chat.id, "🔄 Page refresh attempt 1/2...")
+            wd.refresh()
+            time.sleep(15)
+            human_scroll(wd)
+            time.sleep(3)
+            link_btn = find_link_phone_button(wd)
+
+        # ── Attempt 4: close driver fully, open fresh, retry ──
+        if link_btn is None:
+            bot.send_message(message.chat.id, "🔄 Page refresh attempt 2/2 (full restart)...")
+            reset_driver()
+            wd = get_driver()
+            wd.get("https://web.whatsapp.com")
+            time.sleep(18)
+            human_scroll(wd)
+            time.sleep(5)
             link_btn = find_link_phone_button(wd)
 
         if link_btn is None:
             send_screenshot(
                 message.chat.id,
-                "❌ Could not find *Link with phone number* button.\n\n"
-                "Possible reasons:\n"
-                "• WhatsApp UI changed\n"
-                "• Page failed to load\n"
-                "• IP blocked\n\n"
-                "👉 Try: *🔄 Reset Browser* → *🔗 Login WhatsApp*",
+                "❌ *Could not find Link button after 4 attempts.*\n\n"
+                "The screenshot above shows what the browser currently sees.\n\n"
+                "If it's a *blank white page* → wait 2 minutes and try again.\n"
+                "If it shows *QR code only* → WhatsApp may have changed their UI.\n\n"
+                "👉 Try: *🔄 Reset Browser* → wait 2 min → *🔗 Login WhatsApp*",
                 "no_button.png"
             )
             return
