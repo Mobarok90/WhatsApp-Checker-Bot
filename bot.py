@@ -6,330 +6,676 @@ from telebot import types
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException, NoSuchElementException
 
-# --- কনফিগারেশন ---
-# ⚠️ নিচে আপনার টেলিগ্রাম আইডি নম্বরটি বসিয়ে দিন
-ADMIN_ID = 5165615512 
+# ==============================================================
+# কনফিগারেশন
+# GitHub Actions Secrets থেকে নেওয়া হবে, না পেলে নিচের ডিফল্ট ব্যবহার হবে
+# ==============================================================
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "5165615512"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8803328478:AAEpVHyLj4svKmfktuewTMZP_1ydvu9zdCQ")
 
-BOT_TOKEN = "8803328478:AAEpVHyLj4svKmfktuewTMZP_1ydvu9zdCQ"
+# GitHub Actions-এ /tmp সবসময় writable — session এখানে রাখা হবে
+# /tmp-তে রাখলে Actions re-run-এ নতুন সেশন শুরু হবে (ভালো)
+SESSION_DIR = os.environ.get("WA_SESSION_DIR", "/tmp/whatsapp_session")
+SCREENSHOT_DIR = "/tmp"
+
 bot = telebot.TeleBot(BOT_TOKEN)
-
 driver = None
 
-def get_driver():
-    """ড্রাইভার সচল করার জন্য এবং অ্যান্টি-বট বাইপাস করার ফাংশন"""
+# GitHub Actions-এ DISPLAY environment variable xvfb-run সেট করে দেয়
+# যদি DISPLAY না থাকে তাহলে headless মোড ব্যবহার হবে
+USE_HEADLESS = os.environ.get("DISPLAY") is None
+
+print(f"[CONFIG] ADMIN_ID: {ADMIN_ID}")
+print(f"[CONFIG] Session Dir: {SESSION_DIR}")
+print(f"[CONFIG] Headless Mode: {USE_HEADLESS}")
+print(f"[CONFIG] DISPLAY: {os.environ.get('DISPLAY', 'not set')}")
+
+
+def reset_driver():
+    """ড্রাইভার বন্ধ করে রিসেট করার ফাংশন"""
     global driver
-    if driver is None:
-        options = Options()
-        options.add_argument("--headless=new")  # আধুনিক হেডলেস মোড
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")  # গিটহাব অ্যাকশনের স্ট্যাবিলিটির জন্য জিপিইউ বন্ধ করা
-        options.add_argument("--ignore-certificate-errors")
-        options.add_argument("--window-size=1920,1080")  # ডেস্কটপ লেআউট নিশ্চিত করতে বড় রেজুলেশন
-        
-        # পেজ লোড স্ট্র্যাটেজি 'eager' (ভারী ইমেজের জন্য ব্রাউজার আটকে থাকবে না)
-        options.page_load_strategy = 'eager'
-        
-        # --- অ্যান্টি-বট সিকিউরিটি বাইপাস সেটিংস ---
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        options.add_argument("--user-data-dir=./whatsapp_session")
-        
+    try:
+        if driver is not None:
+            driver.quit()
+    except Exception:
+        pass
+    driver = None
+    print("[DRIVER] Driver reset done.")
+
+
+def get_driver():
+    """GitHub Actions-উপযোগী Chrome ড্রাইভার তৈরির ফাংশন"""
+    global driver
+
+    # ড্রাইভার চলছে কিনা যাচাই
+    if driver is not None:
+        try:
+            _ = driver.current_url
+            return driver
+        except Exception:
+            driver = None
+
+    options = Options()
+
+    # GitHub Actions-এ xvfb-run DISPLAY সেট করে, তাই headless লাগে না
+    # কিন্তু headless থাকলে আরও stable — উভয় সাপোর্ট করা হয়েছে
+    if USE_HEADLESS:
+        options.add_argument("--headless=new")
+        print("[DRIVER] Starting in HEADLESS mode")
+    else:
+        print(f"[DRIVER] Starting with DISPLAY={os.environ.get('DISPLAY')}")
+
+    # GitHub Actions runner-এর জন্য অপরিহার্য অপশন
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--start-maximized")
+    options.add_argument("--lang=en-US,en")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--mute-audio")
+
+    # Page load strategy — ভারী WhatsApp পেজের জন্য 'eager' দ্রুততর
+    options.page_load_strategy = 'eager'
+
+    # অ্যান্টি-বট বাইপাস
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    )
+
+    # WhatsApp সেশন সংরক্ষণ (GitHub Actions-এ /tmp ব্যবহার করা হচ্ছে)
+    os.makedirs(SESSION_DIR, exist_ok=True)
+    options.add_argument(f"--user-data-dir={SESSION_DIR}")
+
+    # GitHub Actions-এ chromedriver সাধারণত PATH-এ থাকে
+    # না থাকলে নিচের পাথগুলো চেক করা হবে
+    driver_paths = [
+        "/usr/bin/chromedriver",
+        "/usr/local/bin/chromedriver",
+        "/opt/hostedtoolcache/chromedriver/chromedriver",
+    ]
+
+    service = None
+    for path in driver_paths:
+        if os.path.exists(path):
+            service = Service(path)
+            print(f"[DRIVER] Using chromedriver: {path}")
+            break
+
+    if service:
+        driver = webdriver.Chrome(service=service, options=options)
+    else:
+        # PATH থেকে chromedriver খুঁজে নেবে
+        print("[DRIVER] Using chromedriver from PATH")
         driver = webdriver.Chrome(options=options)
-        driver.set_page_load_timeout(120)
-        
-        # ব্রাউজারের ভেতর থেকে সেলেনিয়াম রোবট ফ্ল্যাগ মুছে ফেলা
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        })
+
+    driver.set_page_load_timeout(120)
+
+    # Selenium webdriver ফ্ল্যাগ লুকানো
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+
+    print("[DRIVER] Chrome started successfully.")
     return driver
 
-# মানুষের মতো অত্যন্ত ধীরে ধীরে টাইপ করার হেল্পার ফাংশন
+
 def human_type(element, text):
-    element.clear()
+    """মানুষের মতো ধীরে ধীরে টাইপ করার ফাংশন"""
+    try:
+        element.clear()
+    except Exception:
+        pass
     for character in text:
         element.send_keys(character)
-        time.sleep(random.uniform(0.25, 0.55))  # অত্যন্ত ধীরস্থির স্বাভাবিক কিবোর্ড টাইপ স্পিড
+        time.sleep(random.uniform(0.12, 0.28))
 
-# মানুষের মতো ব্রাউজার স্ক্রোল করার হেল্পার ফাংশন
+
+def clear_and_type(web_driver, element, text):
+    """
+    WhatsApp Web-এর React input-এ নম্বর দেওয়ার ফাংশন।
+    তিন স্তরে ক্লিয়ার করে তারপর টাইপ করে।
+    """
+    # ধাপ ১: JavaScript দিয়ে ক্লিয়ার
+    try:
+        web_driver.execute_script("arguments[0].value = '';", element)
+        web_driver.execute_script(
+            "arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", element
+        )
+    except Exception:
+        pass
+    time.sleep(0.4)
+
+    # ধাপ ২: কিবোর্ড শর্টকাট দিয়ে ক্লিয়ার
+    element.click()
+    time.sleep(0.3)
+    element.send_keys(Keys.CONTROL + "a")
+    time.sleep(0.2)
+    element.send_keys(Keys.DELETE)
+    time.sleep(0.3)
+    element.send_keys(Keys.CONTROL + "a")
+    element.send_keys(Keys.BACKSPACE)
+    time.sleep(0.4)
+
+    # ধাপ ৩: মানুষের মতো টাইপ করা
+    human_type(element, text)
+
+    # React-এর জন্য change event dispatch
+    try:
+        web_driver.execute_script(
+            "arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", element
+        )
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+
 def human_scroll(web_driver):
+    """মানুষের মতো স্ক্রোল করার ফাংশন"""
     try:
         web_driver.execute_script("window.scrollTo(0, 200);")
-        time.sleep(2.0)
-        web_driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(1.5)
-    except:
+        web_driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(1.0)
+    except Exception:
         pass
 
-# ব্যর্থ হলে লাইভ ডায়াগনস্টিক রিপোর্ট এবং বাস্তব স্ক্রিনশট পাঠানোর ফাংশন
+
+def take_screenshot(filename="screenshot.png"):
+    """স্ক্রিনশট তোলার ফাংশন — /tmp-তে সেভ করে"""
+    path = os.path.join(SCREENSHOT_DIR, filename)
+    try:
+        driver.save_screenshot(path)
+    except Exception:
+        pass
+    return path
+
+
 def send_failure_diagnostic(message, error_msg, web_driver):
+    """ব্যর্থ হলে স্ক্রিনশট সহ রিপোর্ট পাঠানোর ফাংশন"""
     try:
-        # গিটহাবের ভার্চুয়াল ব্রাউজারের বর্তমান অবস্থার ছবি তোলা
-        web_driver.save_screenshot("diagnostic.png")
-        page_title = web_driver.title
-        current_url = web_driver.current_url
-        
-        report = (
-            "🔍 **[AI গভীর ডায়াগনস্টিক রিপোর্ট]**\n\n"
-            f"❌ **ত্রুটির ধরণ:** `{error_msg}`\n"
-            f"🌐 **লিঙ্ক:** {current_url}\n"
-            f"📄 **টাইটেল:** {page_title}\n\n"
-            "🤖 **AI এনালাইসিস ও সম্ভাব্য সমাধান:**\n"
-            "১. ব্রাউজারটি হোয়াটসঅ্যাপের লোডিং পেজে আটকে থাকতে পারে।\n"
-            "২. সেশন রিফ্রেশ বা কানেকশন জটিলতা তৈরি হতে পারে।\n\n"
-            "👇 ব্রাউজারে ঠিক এই মুহূর্তে কী দেখা যাচ্ছে তার রিয়েল-টাইম স্ক্রিনশট নিচে পাঠানো হলো:"
-        )
-        with open("diagnostic.png", "rb") as diag_file:
-            bot.send_photo(message.chat.id, diag_file, caption=report, parse_mode="Markdown")
-    except Exception as diag_e:
-        bot.send_message(message.chat.id, f"❌ AI ডায়াগনস্টিক রিপোর্ট তৈরি করতে ব্যর্থ হয়েছে: {diag_e}")
-
-# ১. স্টার্ট কমান্ড (কোনো বিলম্ব ছাড়াই বাটন চলে আসবে)
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    btn_developer = types.KeyboardButton("👤 ডেভেলপার")
-    btn_check_ws = types.KeyboardButton("🔍 চেক ডাবলু এস")
-    markup.add(btn_developer, btn_check_ws)
-    
-    bot.send_message(
-        message.chat.id, 
-        "হোয়াটসঅ্যাপ নম্বর চেকার বটে আপনাকে স্বাগত! নিচের বাটনগুলো ব্যবহার করুন:", 
-        reply_markup=markup
-    )
-
-# ২. সুরক্ষিত অ্যাডমিন লগইন কমান্ড (লিঙ্ক কোড জেনারেশন)
-@bot.message_handler(commands=['login'])
-def admin_login(message):
-    # আইডি যাচাই করা
-    if message.chat.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "❌ দুঃখিত, এই কমান্ডটি শুধুমাত্র বটের অ্যাডমিনের জন্য সংরক্ষিত।")
-        return
-
-    msg = bot.send_message(
-        message.chat.id, 
-        "📱 দয়া করে আপনার নিজের হোয়াটসঅ্যাপ নম্বরটি কান্ট্রি কোডসহ পাঠান (যেমন: 88017XXXXXXXX):\n"
-        "(এই নম্বরটি দিয়ে আপনার বটটি কানেক্ট বা লিঙ্ক হবে)"
-    )
-    bot.register_next_step_handler(msg, process_admin_phone)
-
-# ফোন নম্বর প্রসেস এবং হোয়াটসঅ্যাপ থেকে লিঙ্ক কোড পাওয়ার ফাংশন
-def process_admin_phone(message):
-    raw_input = message.text.strip().replace(" ", "")
-    
-    # এআই ভিত্তিক পার্সিং ও আন্তর্জাতিক ফর্ম্যাটিং (+880XXXXXXXXX)
-    if raw_input.startswith("0"):
-        formatted_num = "+880" + raw_input[1:]
-    elif raw_input.startswith("880"):
-        formatted_num = "+" + raw_input
-    elif raw_input.startswith("+"):
-        formatted_num = raw_input
-    else:
-        formatted_num = "+880" + raw_input
-        
-    bot.send_message(message.chat.id, f"⏳ হোয়াটসঅ্যাপে আন্তর্জাতিক ফরম্যাটে ({formatted_num}) লিঙ্ক কোড তৈরি করা হচ্ছে...")
-    
-    try:
-        web_driver = get_driver()
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: ক্রোম সেশন শুরু করা হয়েছে। হোয়াটসঅ্যাপ পেজ লোড হচ্ছে...")
-        web_driver.get("https://web.whatsapp.com")
-        
-        # পেজ লোড হওয়ার পর মানুষের মতো কিছুক্ষণ স্ক্রিন দেখা ও স্ক্রোল করা
-        time.sleep(8)
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: মানুষের মতো স্ক্রিন স্ক্রোল করা হচ্ছে...")
-        human_scroll(web_driver)
-        time.sleep(4)
-        
-        # 'Link with phone number' বাটনটি খোঁজা (প্যারেন্ট ম্যাচ এড়াতে সুনির্দিষ্ট XPath)
-        button_xpath = "//*[contains(text(), 'Link with phone number') or contains(text(), 'Log in with phone number') or contains(text(), 'Link with Phone Number') or contains(text(), 'ফোন নম্বর দিয়ে লিঙ্ক করুন')]"
-        
+        path = take_screenshot("diagnostic.png")
+        page_title = ""
+        current_url = ""
         try:
-            link_btn = WebDriverWait(web_driver, 90).until(
-                EC.element_to_be_clickable((By.XPATH, button_xpath))
+            page_title = web_driver.title
+            current_url = web_driver.current_url
+        except Exception:
+            pass
+
+        report = (
+            "🔍 *ডায়াগনস্টিক রিপোর্ট*\n\n"
+            f"❌ *ত্রুটি:* `{error_msg[:300]}`\n"
+            f"🌐 *URL:* {current_url}\n"
+            f"📄 *টাইটেল:* {page_title}\n\n"
+            "📸 ব্রাউজারের বর্তমান অবস্থা:"
+        )
+        with open(path, "rb") as f:
+            bot.send_photo(message.chat.id, f, caption=report, parse_mode="Markdown")
+    except Exception as ex:
+        bot.send_message(message.chat.id, f"❌ ডায়াগনস্টিক তৈরি করতে ব্যর্থ: {ex}")
+
+
+def find_link_phone_button(web_driver):
+    """
+    'Link with phone number' বাটন খোঁজার ফাংশন।
+    একাধিক XPath স্ট্র্যাটেজি ব্যবহার করা হয়।
+    """
+    strategies = [
+        # data-testid (সবচেয়ে নির্ভরযোগ্য)
+        (By.XPATH, "//*[@data-testid='link-device-phone-number-button']"),
+        (By.XPATH, "//*[@data-testid='intro-link-btn']"),
+        # text-based
+        (By.XPATH, "//div[normalize-space(text())='Link with phone number']"),
+        (By.XPATH, "//div[normalize-space(text())='Log in with phone number']"),
+        (By.XPATH, "//span[normalize-space(text())='Link with phone number']"),
+        (By.XPATH, "//span[normalize-space(text())='Log in with phone number']"),
+        (By.XPATH, "//*[contains(text(),'phone number') and (@role='button' or ancestor::*[@role='button'])]"),
+        # aria-label
+        (By.XPATH, "//*[@aria-label='Link with phone number']"),
+        (By.XPATH, "//*[@aria-label='Log in with phone number']"),
+        # broad fallback
+        (By.XPATH, "//div[@role='button'][contains(.,'phone')]"),
+    ]
+
+    for by, xpath in strategies:
+        try:
+            btn = WebDriverWait(web_driver, 6).until(
+                EC.element_to_be_clickable((by, xpath))
             )
-            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটনটি পাওয়া গেছে। মানুষের মতো ক্লিক করা হচ্ছে...")
-            time.sleep(1.5)
-            
-            # ডাবল-লেয়ার ক্লিক মেথড (যাতে কোনো অবস্থায় ক্লিক মিস না হয়)
+            print(f"[BUTTON] Found with: {xpath}")
+            return btn
+        except Exception:
+            continue
+    return None
+
+
+def find_phone_input(web_driver, timeout=35):
+    """ফোন নম্বর ইনপুট ফিল্ড খোঁজার ফাংশন"""
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        # পদ্ধতি ১: data-testid
+        for testid in [
+            "phone-number-input", "link-device-phone-number-input",
+            "intro-input", "phone-input"
+        ]:
             try:
-                link_btn.click()
+                el = web_driver.find_element(By.XPATH, f"//*[@data-testid='{testid}']")
+                if el.is_displayed() and el.is_enabled():
+                    print(f"[INPUT] Found by data-testid: {testid}")
+                    return el
             except Exception:
-                web_driver.execute_script("arguments[0].click();", link_btn)
-                
-            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: বাটন ক্লিক করা হয়েছে। পেজ পরিবর্তন ও এনিমেশনের জন্য অপেক্ষা করা হচ্ছে...")
-            time.sleep(8)  # পেজ পরিবর্তন ও লোডের জন্য মানুষের মতো ৮ সেকেন্ড সময় দেওয়া
-        except Exception as e:
-            # চ্যাট লিস্ট আছে কিনা চেক করি (অলরেডি লগইন থাকলে)
-            chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
-            if len(chat_list) > 0:
-                bot.send_message(message.chat.id, "✅ আপনার হোয়াটসঅ্যাপ সেশন ইতিপূর্বে সফলভাবে লগইন করা আছে!")
-                return
-            else:
-                raise e
-        
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: দৃশ্যমান ও সক্রিয় ফোন নম্বর ইনপুট বক্সটি ফিল্টার করা হচ্ছে...")
-        
-        # প্রথম দৃশ্যমান ও সক্রিয় ইনপুট ফিল্ডটি খুঁজে বের করা (একটি মাত্র ইনপুট ফিল্ড থাকবে)
-        phone_input = None
-        start_input_time = time.time()
-        while time.time() - start_input_time < 30:
+                pass
+
+        # পদ্ধতি ২: type="tel"
+        try:
+            el = web_driver.find_element(By.XPATH, "//input[@type='tel']")
+            if el.is_displayed() and el.is_enabled():
+                print("[INPUT] Found by type=tel")
+                return el
+        except Exception:
+            pass
+
+        # পদ্ধতি ৩: placeholder দিয়ে
+        for ph in ["phone", "Phone", "number", "Number"]:
+            try:
+                el = web_driver.find_element(By.XPATH, f"//input[contains(@placeholder, '{ph}')]")
+                if el.is_displayed() and el.is_enabled():
+                    print(f"[INPUT] Found by placeholder: {ph}")
+                    return el
+            except Exception:
+                pass
+
+        # পদ্ধতি ৪: যেকোনো দৃশ্যমান input
+        try:
             inputs = web_driver.find_elements(By.XPATH, "//input")
             for inp in inputs:
                 if inp.is_displayed() and inp.is_enabled():
-                    inp_type = inp.get_attribute("type")
-                    if inp_type != "file" and inp_type != "hidden":
-                        phone_input = inp
-                        break
-            if phone_input:
-                break
-            time.sleep(2)
-            
-        if phone_input is None:
-            raise TimeoutException("ফোন নম্বর ইনপুট বক্সটি দৃশ্যমান অবস্থায় পাওয়া যায়নি।")
-        
-        # কান্ট্রি কোডসহ ডিফল্ট নম্বরটি সম্পূর্ণ মুছে ফেলা
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: কিবোর্ডের মাধ্যমে ডিফল্ট কান্ট্রি কোডটি সম্পূর্ণ মুছে ফেলা হচ্ছে...")
-        phone_input.send_keys(Keys.CONTROL + "a")
-        phone_input.send_keys(Keys.BACKSPACE)
-        time.sleep(1.5)
-        
-        # মানুষের মতো প্লাস (+) চিহ্ন ও সম্পূর্ণ নম্বরটি টাইপ করা
-        bot.send_message(message.chat.id, f"🤖 [AI এনাসিস]: প্লাস (+) ও কান্ট্রি কোডসহ মানুষের মতো টাইপ করে {formatted_num} ইনপুট দেওয়া হচ্ছে...")
-        human_type(phone_input, formatted_num)
-        
-        # সাবমিট করার আগে মানুষের মতো নম্বরটি রিভিউ করার বিরতি (৩ সেকেন্ড)
-        time.sleep(3)
-        
-        # সবুজ 'Next' বাটন খুঁজে বের করে ক্লিক করা
-        bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: সবুজ 'Next' বাটনে ক্লিক করা হচ্ছে...")
-        next_button_xpath = "//*[contains(text(), 'Next') or contains(text(), 'পরবর্তী') or contains(text(), 'NEXT')]"
+                    t = inp.get_attribute("type") or ""
+                    if t not in ("file", "hidden", "checkbox", "radio", "submit", "button", "image"):
+                        print(f"[INPUT] Found generic input type={t}")
+                        return inp
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+    return None
+
+
+def click_next_button(web_driver, phone_input=None):
+    """Next বাটন খুঁজে ক্লিক করার ফাংশন"""
+    strategies = [
+        (By.XPATH, "//*[@data-testid='link-device-phone-number-next-btn']"),
+        (By.XPATH, "//div[@role='button'][normalize-space(.)='Next']"),
+        (By.XPATH, "//button[normalize-space(.)='Next']"),
+        (By.XPATH, "//span[normalize-space(text())='Next']/parent::*[@role='button']"),
+        (By.XPATH, "//span[normalize-space(text())='Next']/ancestor::button"),
+        (By.XPATH, "//*[@role='button'][contains(.,'Next')]"),
+    ]
+
+    for by, xpath in strategies:
         try:
-            next_btn = WebDriverWait(web_driver, 15).until(
-                EC.element_to_be_clickable((By.XPATH, next_button_xpath))
+            btn = WebDriverWait(web_driver, 8).until(
+                EC.element_to_be_clickable((by, xpath))
             )
             try:
-                next_btn.click()
+                btn.click()
             except Exception:
-                web_driver.execute_script("arguments[0].click();", next_btn)
+                web_driver.execute_script("arguments[0].click();", btn)
+            print(f"[NEXT] Clicked with: {xpath}")
+            return True
         except Exception:
-            # যদি কোনো কারণে নেক্সট বাটন কাজ না করে, কিবোর্ড থেকে এন্টার প্রেস করা হবে
-            bot.send_message(message.chat.id, "🤖 [AI এনালাইসিস]: 'Next' বাটনটি ক্লিকযোগ্য না থাকায় কিবোর্ডের এন্টার প্রেস করে সাবমিট করা হচ্ছে...")
-            phone_input.send_keys(Keys.ENTER)
-            
-        time.sleep(12) # কোড সম্পূর্ণভাবে জেনারেট হয়ে স্ক্রিনে আসার সময়
-        
-        # স্ক্রিনশট নিয়ে উইন্ডো পাঠানো
-        web_driver.save_screenshot("pairing_code.png")
-        with open("pairing_code.png", "rb") as code_file:
-            caption_text = (
-                "🔑 ছবির মাঝখানে আপনার ৮-অক্ষরের লিঙ্ক কোডটি দেখতে পাবেন।\n\n"
-                "👉 **এটি যেভাবে লিঙ্ক করবেন:**\n"
-                "১. আপনার মোবাইলের WhatsApp-এ যান ➡️ ডানদিকের ৩টি ডট (বা সেটিংস) ➡️ Linked Devices (লিঙ্ক ডিভাইস) ➡️ Link a Device এ ক্লিক করুন।\n"
-                "২. এবার নিচে থাকা 'Link with phone number instead' (ফোন নম্বর দিয়ে লিঙ্ক করুন) অপশনটিতে ক্লিক করুন।\n"
-                "৩. ছবিতে দেখতে পাওয়া ৮ অক্ষরের লিঙ্ক কোডটি আপনার মোবাইলে সঠিকভাবে টাইপ করুন।"
-            )
-            bot.send_photo(message.chat.id, code_file, caption=caption_text)
-            
-        bot.send_message(message.chat.id, "⏳ আপনার মোবাইলে কোডটি প্রবেশ করার জন্য অপেক্ষা করছি (আমি ১ মিনিট চেক করব)...")
-        linked = False
-        for _ in range(20): # মোট ৬০ সেকেন্ড চেক করবে
-            time.sleep(3)
-            chat_list = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
-            if len(chat_list) > 0:
-                linked = True
-                break
-                
-        if linked:
-            bot.send_message(message.chat.id, "🎉 অভিনন্দন! আপনার হোয়াটসঅ্যাপ অ্যাকাউন্টটি সফলভাবে লিঙ্ক হয়েছে। এখন যেকোনো ইউজার সরাসরি নম্বর চেক করতে পারবেন।")
-        else:
-            bot.send_message(message.chat.id, "⏱️ লিঙ্ক করার সময় শেষ হয়ে গেছে। যদি এখনও লিঙ্ক না হয়ে থাকে, তবে আবার `/login` লিখে চেষ্টা করুন।")
-            
-    except Exception as e:
-        # জটিল এরর মেসেজগুলো মানুষের পাঠযোগ্য বাংলায় রূপান্তর করা
-        error_msg = str(e).split("\n")[0]
-        if "TimeoutException" in str(type(e)):
-            error_msg = "হোয়াটসঅ্যাপ পেজ লোড হতে অতিরিক্ত সময় লেগেছে (সার্ভার স্লো)।"
-        elif "WebDriverException" in str(type(e)):
-            error_msg = "ব্রাউজার ব্যাকগ্রাউন্ডে চালু হতে ব্যর্থ হয়েছে।"
-            
-        # ব্যর্থতার প্রকৃত কারণ এবং বাস্তব স্ক্রিনশট সহ রিপোর্ট পাঠানো
-        send_failure_diagnostic(message, error_msg, web_driver)
+            continue
 
-# ৩. সাধারণ বাটন ক্লিক হ্যান্ডলার
+    # fallback: Enter key
+    if phone_input:
+        try:
+            phone_input.send_keys(Keys.RETURN)
+            print("[NEXT] Used Enter key")
+            return True
+        except Exception:
+            pass
+
+    return False
+
+
+# ========================================
+# টেলিগ্রাম কমান্ড হ্যান্ডলার
+# ========================================
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    markup.add(
+        types.KeyboardButton("👤 ডেভেলপার"),
+        types.KeyboardButton("🔍 চেক ডাবলু এস")
+    )
+    bot.send_message(
+        message.chat.id,
+        "হোয়াটসঅ্যাপ নম্বর চেকার বটে স্বাগত! নিচের বাটন ব্যবহার করুন:",
+        reply_markup=markup
+    )
+
+
+@bot.message_handler(commands=['login'])
+def admin_login(message):
+    if message.chat.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ এই কমান্ড শুধুমাত্র অ্যাডমিনের জন্য।")
+        return
+    msg = bot.send_message(
+        message.chat.id,
+        "📱 হোয়াটসঅ্যাপ নম্বর পাঠান (যেমন: 88017XXXXXXXX বা 017XXXXXXXX):\n"
+        "⚠️ GitHub Actions-এ প্রতিটি run-এ নতুন সেশন শুরু হয়।"
+    )
+    bot.register_next_step_handler(msg, process_admin_phone)
+
+
+@bot.message_handler(commands=['reset'])
+def reset_command(message):
+    if message.chat.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ এই কমান্ড শুধুমাত্র অ্যাডমিনের জন্য।")
+        return
+    reset_driver()
+    bot.send_message(message.chat.id, "✅ ব্রাউজার রিসেট হয়েছে। এখন `/login` দিয়ে আবার চেষ্টা করুন।")
+
+
+@bot.message_handler(commands=['status'])
+def status_command(message):
+    """বটের বর্তমান অবস্থা চেক করার কমান্ড"""
+    if message.chat.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ এই কমান্ড শুধুমাত্র অ্যাডমিনের জন্য।")
+        return
+
+    status_lines = [
+        "📊 *বট স্ট্যাটাস:*\n",
+        f"🖥️ DISPLAY: `{os.environ.get('DISPLAY', 'না')}`",
+        f"🤖 Headless: `{USE_HEADLESS}`",
+        f"📁 Session: `{SESSION_DIR}`",
+        f"🔑 Admin ID: `{ADMIN_ID}`",
+    ]
+
+    # ড্রাইভার চলছে কিনা
+    try:
+        if driver is not None:
+            url = driver.current_url
+            status_lines.append(f"🌐 ব্রাউজার: `চালু ({url[:50]}...)`")
+        else:
+            status_lines.append("🌐 ব্রাউজার: `বন্ধ`")
+    except Exception:
+        status_lines.append("🌐 ব্রাউজার: `ত্রুটি`")
+
+    bot.send_message(message.chat.id, "\n".join(status_lines), parse_mode="Markdown")
+
+
+def process_admin_phone(message):
+    """ফোন নম্বর প্রসেস করে WhatsApp লিঙ্ক কোড আনার ফাংশন"""
+    raw = message.text.strip().replace(" ", "").replace("-", "")
+
+    # নম্বর ফরম্যাট করা
+    if raw.startswith("00"):
+        formatted = "+" + raw[2:]
+    elif raw.startswith("0"):
+        formatted = "+880" + raw[1:]
+    elif raw.startswith("880") and not raw.startswith("+"):
+        formatted = "+" + raw
+    elif raw.startswith("+"):
+        formatted = raw
+    else:
+        formatted = "+880" + raw
+
+    print(f"[LOGIN] Formatted number: {formatted}")
+    bot.send_message(
+        message.chat.id,
+        f"⏳ `{formatted}` নম্বরে লিঙ্ক কোড তৈরি হচ্ছে...\n"
+        f"(GitHub Actions-এ ৩০-৯০ সেকেন্ড লাগতে পারে)",
+        parse_mode="Markdown"
+    )
+
+    web_driver = None
+    try:
+        web_driver = get_driver()
+
+        bot.send_message(message.chat.id, "🌐 WhatsApp Web খোলা হচ্ছে...")
+        web_driver.get("https://web.whatsapp.com")
+        time.sleep(12)
+        human_scroll(web_driver)
+        time.sleep(3)
+
+        # ইতিমধ্যে লগইন আছে কিনা চেক
+        chat_pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+        if chat_pane:
+            bot.send_message(message.chat.id, "✅ WhatsApp সেশন ইতিমধ্যে সক্রিয় আছে!")
+            return
+
+        # Link with phone number বাটন খোঁজা
+        bot.send_message(message.chat.id, "🔍 'Link with phone number' বাটন খোঁজা হচ্ছে...")
+        link_btn = find_link_phone_button(web_driver)
+
+        if link_btn is None:
+            bot.send_message(message.chat.id, "⏳ আরও ১৫ সেকেন্ড অপেক্ষা করা হচ্ছে...")
+            time.sleep(15)
+            link_btn = find_link_phone_button(web_driver)
+
+        if link_btn is None:
+            # স্ক্রিনশট দিয়ে রিপোর্ট
+            path = take_screenshot("no_button.png")
+            with open(path, "rb") as f:
+                bot.send_photo(
+                    message.chat.id, f,
+                    caption=(
+                        "❌ 'Link with phone number' বাটন পাওয়া যায়নি।\n\n"
+                        "সম্ভাব্য কারণ:\n"
+                        "• WhatsApp UI পরিবর্তন হয়েছে\n"
+                        "• পেজ লোড হয়নি\n"
+                        "• IP block হয়েছে\n\n"
+                        "➡️ `/reset` দিয়ে রিসেট করুন, তারপর `/login` দিন।"
+                    )
+                )
+            return
+
+        bot.send_message(message.chat.id, "✅ বাটন পাওয়া গেছে! ক্লিক করা হচ্ছে...")
+        time.sleep(random.uniform(1.0, 2.0))
+        try:
+            link_btn.click()
+        except Exception:
+            web_driver.execute_script("arguments[0].click();", link_btn)
+        time.sleep(8)
+
+        # ফোন ইনপুট খোঁজা
+        bot.send_message(message.chat.id, "🔍 ফোন ইনপুট বক্স খোঁজা হচ্ছে...")
+        phone_input = find_phone_input(web_driver, timeout=35)
+
+        if phone_input is None:
+            send_failure_diagnostic(message, "ফোন ইনপুট বক্স পাওয়া যায়নি", web_driver)
+            return
+
+        bot.send_message(message.chat.id, f"✏️ নম্বর টাইপ করা হচ্ছে: `{formatted}`", parse_mode="Markdown")
+
+        # নম্বর দেওয়া — প্রথমে + সহ পূর্ণ নম্বর
+        clear_and_type(web_driver, phone_input, formatted)
+        time.sleep(1.5)
+
+        # যদি input-এ কিছু না থাকে, শুধু digits চেষ্টা
+        try:
+            val = phone_input.get_attribute("value") or ""
+            if len(val.replace("+", "").strip()) < 5:
+                print("[INPUT] Value too short, trying digits only")
+                digits = formatted.replace("+", "")
+                clear_and_type(web_driver, phone_input, digits)
+                time.sleep(1.5)
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+        # Next বাটন ক্লিক
+        bot.send_message(message.chat.id, "➡️ Next বাটন ক্লিক করা হচ্ছে...")
+        click_next_button(web_driver, phone_input)
+
+        bot.send_message(message.chat.id, "⏳ লিঙ্ক কোড আসছে (১৫ সেকেন্ড)...")
+        time.sleep(15)
+
+        # স্ক্রিনশট নেওয়া
+        path = take_screenshot("pairing_code.png")
+        with open(path, "rb") as f:
+            caption = (
+                "🔑 ছবিতে *৮ অক্ষরের লিঙ্ক কোড* দেখুন।\n\n"
+                "*মোবাইলে কীভাবে দেবেন:*\n"
+                "১. WhatsApp → ৩টি ডট → Linked Devices → Link a Device\n"
+                "২. নিচে 'Link with phone number instead' চাপুন\n"
+                "৩. ৮ অক্ষরের কোডটি টাইপ করুন"
+            )
+            bot.send_photo(message.chat.id, f, caption=caption, parse_mode="Markdown")
+
+        # ১০ সেকেন্ড পরে আরেকটি আপডেটেড স্ক্রিনশট
+        time.sleep(10)
+        path2 = take_screenshot("pairing_code_2.png")
+        with open(path2, "rb") as f2:
+            bot.send_photo(message.chat.id, f2, caption="📸 আপডেটেড স্ক্রিনশট (কোড স্পষ্ট দেখা যাচ্ছে কিনা দেখুন):")
+
+        # ২ মিনিট লিঙ্ক হওয়ার জন্য অপেক্ষা
+        bot.send_message(
+            message.chat.id,
+            "⏳ মোবাইলে কোড দেওয়ার জন্য *২ মিনিট* অপেক্ষা করছি...",
+            parse_mode="Markdown"
+        )
+        linked = False
+        for i in range(24):
+            time.sleep(5)
+            try:
+                pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+                if pane:
+                    linked = True
+                    break
+            except Exception:
+                break
+
+        if linked:
+            bot.send_message(
+                message.chat.id,
+                "🎉 *অভিনন্দন!* WhatsApp সফলভাবে লিঙ্ক হয়েছে!\n"
+                "এখন যেকোনো নম্বর চেক করা যাবে। ✅",
+                parse_mode="Markdown"
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                "⏱️ ২ মিনিট শেষ। লিঙ্ক না হলে আবার চেষ্টা করুন:\n"
+                "1️⃣ `/reset` → 2️⃣ `/login`",
+                parse_mode="Markdown"
+            )
+
+    except Exception as e:
+        error_msg = str(e).split("\n")[0][:300]
+        if "TimeoutException" in str(type(e)):
+            error_msg = "WhatsApp Web পেজ লোড হতে বেশি সময় লেগেছে।"
+        elif "WebDriverException" in str(type(e)):
+            error_msg = "Chrome ব্রাউজার চালু হতে ব্যর্থ।"
+
+        print(f"[ERROR] process_admin_phone: {e}")
+        if web_driver:
+            send_failure_diagnostic(message, error_msg, web_driver)
+        else:
+            bot.send_message(message.chat.id, f"❌ ত্রুটি: {error_msg}")
+
+        reset_driver()
+
+
+# ========================================
+# বাটন হ্যান্ডলার
+# ========================================
+
 @bot.message_handler(func=lambda message: True)
 def handle_buttons(message):
     if message.text == "👤 ডেভেলপার":
-        dev_info = (
-            "👤 **ডেভেলপার ইনফরমেশন:**\n\n"
-            "এই অটোমেশন সিস্টেমটি পাইথন দিয়ে তৈরি করা হয়েছে।"
+        bot.send_message(
+            message.chat.id,
+            "👤 *ডেভেলপার ইনফো:*\n\nPython + Selenium + GitHub Actions দিয়ে তৈরি।",
+            parse_mode="Markdown"
         )
-        bot.send_message(message.chat.id, dev_info, parse_mode="Markdown")
-        
     elif message.text == "🔍 চেক ডাবলু এস":
         msg = bot.send_message(
-            message.chat.id, 
-            "অনুগ্রহ করে কান্ট্রি কোডসহ ফোন নম্বরটি পাঠান (যেমন: 88017XXXXXXXX):"
+            message.chat.id,
+            "কান্ট্রি কোডসহ নম্বর পাঠান (যেমন: 88017XXXXXXXX):"
         )
         bot.register_next_step_handler(msg, process_phone)
 
-# ৪. নম্বর যাচাই করার মূল লজিক
+
 def process_phone(message):
+    """WhatsApp নম্বর যাচাই করার ফাংশন"""
     phone = message.text.strip()
     if phone in ["👤 ডেভেলপার", "🔍 চেক ডাবলু এস"]:
         handle_buttons(message)
         return
 
-    bot.send_message(message.chat.id, f"⏳ {phone} নম্বরটি যাচাই করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...")
-    
+    bot.send_message(message.chat.id, f"⏳ `{phone}` যাচাই হচ্ছে...", parse_mode="Markdown")
+
     try:
         web_driver = get_driver()
         url = f"https://web.whatsapp.com/send?phone={phone}"
         web_driver.get(url)
-        
-        # পেজ লোড হওয়ার জন্য অপেক্ষা
-        time.sleep(10)
-        
+        time.sleep(13)
+
         # লগইন স্ট্যাটাস চেক
-        qr_present = web_driver.find_elements(By.XPATH, "//canvas[@aria-label='Scan me!']")
-        chat_pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
+        qr = web_driver.find_elements(By.XPATH, "//canvas[@aria-label='Scan me!'] | //*[@data-testid='qrcode']")
+        pane = web_driver.find_elements(By.XPATH, "//div[@id='pane-side']")
         chat_input = web_driver.find_elements(By.XPATH, "//div[@contenteditable='true']")
-        
-        if len(qr_present) > 0 or (len(chat_pane) == 0 and len(chat_input) == 0):
+
+        if qr or (not pane and not chat_input):
             bot.send_message(
-                message.chat.id, 
-                "⚠️ বটটি এখনও আপনার হোয়াটসঅ্যাপের সাথে লিংক করা নেই!\n\n"
-                "👉 দয়া করে প্রথমে বটের চ্যাটে `/login` কমান্ডটি ব্যবহার করে অ্যাকাউন্টটি কানেক্ট করুন।"
+                message.chat.id,
+                "⚠️ বটটি WhatsApp-এর সাথে লিঙ্ক নেই!\n"
+                "👉 প্রথমে `/login` কমান্ড ব্যবহার করুন।"
             )
             return
 
-        # ইনভ্যালিড নম্বর চেক করা
-        invalid_popup = web_driver.find_elements(By.XPATH, "//*[contains(text(), 'invalid') or contains(text(), 'অবৈধ') or contains(text(), 'Invalid')]")
-        if len(invalid_popup) > 0:
+        # ইনভ্যালিড নম্বর চেক
+        invalid = web_driver.find_elements(
+            By.XPATH,
+            "//*[contains(text(),'invalid') or contains(text(),'Invalid') "
+            "or contains(text(),'not registered') or contains(text(),'অবৈধ')]"
+        )
+        if invalid:
             try:
-                ok_button = web_driver.find_element(By.XPATH, "//button//span[contains(text(), 'OK') or contains(text(), 'ঠিক আছে')]")
-                ok_button.click()
-            except:
+                ok = web_driver.find_element(By.XPATH, "//button[contains(.,'OK')]")
+                ok.click()
+            except Exception:
                 pass
-            bot.send_message(message.chat.id, f"❌ {phone} নম্বরটিতে কোনো হোয়াটসঅ্যাপ অ্যাকাউন্ট নেই।")
+            bot.send_message(message.chat.id, f"❌ `{phone}` নম্বরে WhatsApp নেই।", parse_mode="Markdown")
+        elif chat_input:
+            bot.send_message(message.chat.id, f"✅ `{phone}` নম্বরে সক্রিয় WhatsApp অ্যাকাউন্ট আছে।", parse_mode="Markdown")
         else:
-            # চ্যাট ইনপুট বক্স আছে কি না চেক করা (সঠিক নম্বর)
-            if len(chat_input) > 0:
-                bot.send_message(message.chat.id, f"✅ {phone} নম্বরটিতে একটি সক্রিয় হোয়াটসঅ্যাপ অ্যাকাউন্ট আছে।")
-            else:
-                bot.send_message(message.chat.id, "⚠️ নিশ্চিত হওয়া যায়নি। পেজ লোড হতে অতিরিক্ত সময় লেগেছে।")
-                
-    except Exception as e:
-        print(f"Error: {e}")
-        bot.send_message(message.chat.id, "❌ একটি অভ্যন্তরীণ ত্রুটি ঘটেছে। অনুগ্রহ করে আবার চেষ্টা করুন।")
+            bot.send_message(message.chat.id, f"⚠️ `{phone}` — নিশ্চিত করা যায়নি। পেজ লোড সম্পন্ন হয়নি।", parse_mode="Markdown")
 
-# পোলিং স্টার্ট
+    except Exception as e:
+        print(f"[ERROR] process_phone: {e}")
+        bot.send_message(message.chat.id, "❌ একটি ত্রুটি ঘটেছে। আবার চেষ্টা করুন।")
+        reset_driver()
+
+
+# ========================================
+# মেইন
+# ========================================
 if __name__ == "__main__":
-    print("টেলিগ্রাম বট ব্যাকগ্রাউন্ডে সচল করা হচ্ছে...")
-    bot.infinity_polling()
+    print("=" * 50)
+    print("টেলিগ্রাম বট চালু হচ্ছে...")
+    print(f"ADMIN_ID: {ADMIN_ID}")
+    print(f"SESSION_DIR: {SESSION_DIR}")
+    print(f"Headless: {USE_HEADLESS}")
+    print("=" * 50)
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
