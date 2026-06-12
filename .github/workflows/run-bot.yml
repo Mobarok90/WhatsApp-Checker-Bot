@@ -1,14 +1,9 @@
-name: 24/7 WhatsApp Checker Bot
+name: 24/7 WhatsApp OTP Bot
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *' # প্রতি ৩ ঘণ্টা পর পর ওয়ার্কফ্লো রান হবে
-  workflow_dispatch:      # ম্যানুয়ালি রান করার জন্য
-
-# নতুন রান শুরু হলে আগের পুরোনো রানটি অটোম্যাটিক বন্ধ হয়ে যাবে
-concurrency:
-  group: whatsapp-checker-bot
-  cancel-in-progress: true
+    - cron: '0 */3 * * *'
 
 jobs:
   run-bot:
@@ -17,37 +12,36 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # সেশন ক্যাশ সংরক্ষণ
-      - name: Cache WhatsApp Session
-        uses: actions/cache@v3
-        with:
-          path: ./whatsapp_session
-          key: whatsapp-session-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            whatsapp-session-${{ runner.os }}-
-
-      - name: Install Google Chrome
+      - name: Install Chrome
         run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update -q
+          sudo apt-get install -y google-chrome-stable xvfb
 
-      # 🔍 এখানে মূল স্মার্ট ফিক্স: অফিশিয়াল অ্যাকশন যা ক্রোমের সংস্করণের সাথে ১০০% মিলিয়ে ড্রাইভার সেটআপ করবে
-      - name: Setup ChromeDriver
-        uses: nanasess/setup-chromedriver@v3
-
-      - name: Install Python Requirements
+      - name: Install ChromeDriver
         run: |
-          python -m pip install --upgrade pip
-          pip install pyTelegramBotAPI selenium
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+          echo "Chrome version: $CHROME_VERSION"
+          pip install selenium webdriver-manager
+
+      - name: Install Requirements
+        run: |
+          pip install pyTelegramBotAPI selenium webdriver-manager requests
 
       - name: Run Selenium Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.ADMIN_ID }}
+          DISPLAY: ':99'
         run: |
-          # xvfb-run ব্যবহার করে ভার্চুয়াল ডিসপ্লেতে হেডলেস ক্রোম রান করা
-          xvfb-run --auto-servernum timeout 220m python -u bot.py || true
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 3
+          timeout 230m python -u bot.py || true
